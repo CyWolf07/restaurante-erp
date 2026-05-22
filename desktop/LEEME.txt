@@ -1,0 +1,67 @@
+ERP RESTAURANTE — INSTALACION EN PC (SERVIDOR + TABLETS)
+========================================================
+
+OPCION A — INSTALADOR .EXE (RECOMENDADO PARA EL CLIENTE)
+--------------------------------------------------------
+1. En una PC con el proyecto, genera los ejecutables (una sola vez):
+      cd desktop
+      powershell -ExecutionPolicy Bypass -File .\crear-instalador.ps1
+
+2. Entrega al cliente estos archivos de la carpeta desktop\:
+      Instalar-RestauranteERP.exe   <- primera instalacion
+      RestauranteERP.exe            <- iniciar el servidor cada dia
+
+3. El cliente hace doble clic en Instalar-RestauranteERP.exe
+   - Elige carpeta (por defecto C:\RestauranteERP)
+   - Configura PostgreSQL en .env cuando se abra el bloc de notas
+   - Se crean accesos directos en escritorio y menu Inicio
+
+
+OPCION B — INSTALADOR MSI/SETUP PROFESIONAL (Inno Setup)
+------------------------------------------------------
+1. Descarga Inno Setup: https://jrsoftware.org/isinfo.php
+2. (Opcional) Genera RestauranteERP.exe con crear-instalador.ps1
+3. Abre desktop\setup.iss en Inno Setup -> Compile (F9)
+4. El instalador queda en: desktop\Output\RestauranteERP-Setup.exe
+   - Instala en Archivos de programa
+   - Crea iconos y regla de firewall
+   - Ejecuta migraciones al finalizar
+
+
+OPCION C — SIN COMPILAR (DESARROLLO)
+------------------------------------
+   desktop\Instalar-RestauranteERP.bat   -> instalacion
+   desktop\Iniciar-RestauranteERP.bat    -> arrancar servidor
+
+
+REQUISITOS EN EL PC SERVIDOR
+----------------------------
+   - Windows 10/11
+   - PHP 8.2+ en PATH (Laragon recomendado: https://laragon.org)
+   - Composer (https://getcomposer.org)
+   - PostgreSQL 16+ y base restaurant_erp creada
+   - .env con DB_CONNECTION=pgsql y credenciales correctas
+
+
+USO DIARIO
+----------
+   Doble clic: RestauranteERP.exe (o acceso directo "Restaurante ERP")
+   Abre: http://127.0.0.1:8080/login
+   Tablets misma WiFi: http://IP-DEL-PC:8080
+
+
+PINES DE PRUEBA (tras db:seed)
+------------------------------
+   Mesero: 3333 | Cajero: 2222 | Admin: 1111 | Programador: 0000
+
+
+DEPARTAMENTOS DE INVENTARIO (1-8)
+---------------------------------
+   1 MATERIA PRIMA
+   2 PRODUCTOS TERMINADOS
+   3 ASEO
+   4 CONSUMIBLES
+   5 ELEMENTOS COCINA Y SERVICIO
+   6 HERRAMIENTAS
+   7 EQUIPOS
+   8 MUEBLES Y ENCERES
