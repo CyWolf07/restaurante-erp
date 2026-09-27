@@ -49,7 +49,7 @@ class InventoryImportController extends Controller
 
         $upload = $this->storeUploadedFile($request->file('csv_file'));
 
-        return $this->runImport($upload, $importer, $request->boolean('update_existing', true));
+        return $this->runImport($upload, $importer, $request->boolean('update_existing'));
     }
 
     /** Importa un archivo previamente cargado. */
@@ -62,11 +62,14 @@ class InventoryImportController extends Controller
             return back()->with('error', 'El archivo ya no existe en el servidor.');
         }
 
-        return $this->runImport($upload, $importer, $request->boolean('update_existing', true));
+        return $this->runImport($upload, $importer, $request->boolean('update_existing'), $request->boolean('confirm'));
     }
 
     public function destroy(InventoryCsvUpload $upload)
     {
+        if ($upload->imported_at) {
+            return back()->with('error', 'El archivo importado se conserva como evidencia del lote.');
+        }
         $name = $upload->original_name;
         $upload->deleteStoredFile();
         $upload->delete();
@@ -116,7 +119,8 @@ class InventoryImportController extends Controller
     private function runImport(
         InventoryCsvUpload $upload,
         CommerceInventoryImportService $importer,
-        bool $updateExisting
+        bool $updateExisting,
+        bool $confirm = false
     ) {
         $fullPath = $upload->fullPath();
         $fakeFile = new UploadedFile(
@@ -127,18 +131,23 @@ class InventoryImportController extends Controller
             true
         );
 
-        $result = $importer->import($fakeFile, $updateExisting);
+        if (! $confirm) {
+            $result = $importer->import($fakeFile, $updateExisting, true);
+            return view('programmer.inventory-preview', compact('upload', 'result', 'updateExisting'));
+        }
 
-        $upload->update([
-            'imported_at'    => now(),
-            'import_summary' => [
-                'created'    => $result['created'],
-                'updated'    => $result['updated'],
-                'skipped'    => $result['skipped'],
-                'total_rows' => $result['total_rows'],
-                'errors'     => count($result['errors']),
-            ],
-        ]);
+        $result = app(\App\Services\PosOperationService::class)->run(function () use ($upload, $importer, $fakeFile, $updateExisting) {
+            $upload->refresh();
+            if ($upload->imported_at) {
+                return ['created' => 0, 'updated' => 0, 'skipped' => 0, 'total_rows' => 0, 'errors' => ['Este lote ya fue importado. No se aplicó nuevamente.']];
+            }
+            $result = $importer->import($fakeFile, $updateExisting);
+            if ($result['errors'] === []) {
+                $upload->update(['imported_at' => now(), 'import_summary' => $result]);
+            }
+            return $result;
+        }, false);
+
 
         $message = "«{$upload->original_name}»: {$result['created']} creados, {$result['updated']} actualizados, {$result['skipped']} omitidos.";
 
@@ -146,11 +155,11 @@ class InventoryImportController extends Controller
             $preview = array_slice($result['errors'], 0, 15);
             session()->flash('import_errors', $result['errors']);
 
-            return back()
+            return redirect()->route('programmer.inventory-import')
                 ->with('warning', $message . ' Se encontraron ' . count($result['errors']) . ' advertencia(s).')
                 ->with('import_preview', $preview);
         }
 
-        return back()->with('success', $message);
+        return redirect()->route('programmer.inventory-import')->with('success', $message);
     }
 }

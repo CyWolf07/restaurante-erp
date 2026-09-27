@@ -14,7 +14,7 @@
 @if($needsRepair->isEmpty())
     <div class="alert alert-success">✅ Todos los insumos están consistentes.</div>
 @else
-    <div class="alert alert-warning">⚠️ {{ $needsRepair->count() }} insumo(s) con desfase detectado.</div>
+    <div class="alert alert-warning">⚠️ {{ $needsRepair->count() }} insumo(s) requieren revisión del saldo inicial y sus documentos. No se modificaron existencias ni movimientos históricos.</div>
 @endif
 
 <div class="card">
@@ -25,7 +25,7 @@
                 <th>Stock actual</th>
                 <th>Calculado (logs)</th>
                 <th>Desfase</th>
-                <th>¿Reparar?</th>
+                <th>Estado</th>
             </tr>
         </thead>
         <tbody>
@@ -39,7 +39,7 @@
                 </td>
                 <td>
                     @if($row['needs_repair'])
-                        <span class="badge badge-yellow">Sí</span>
+                        <span class="badge badge-yellow">Revisar documentos</span>
                     @else
                         <span class="badge badge-green">OK</span>
                     @endif

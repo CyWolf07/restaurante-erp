@@ -8,19 +8,14 @@ use Illuminate\Console\Command;
 class RepairInventoryIntegrity extends Command
 {
     protected $signature = 'inventory:repair {--dry-run : Solo mostrar desfases sin corregir} {--user-id= : ID del programador}';
-    protected $description = 'Recalcula stock desde inventory_logs y corrige desfases de integridad';
+    protected $description = 'Compara saldos y movimientos sin modificar existencias';
 
     public function handle(ProgrammerPanelService $service): int
     {
         $dryRun = $this->option('dry-run');
         $userId = $this->option('user-id');
 
-        if (!$userId && !$dryRun) {
-            $this->error('Se requiere --user-id para registrar los ajustes (o usar --dry-run)');
-            return self::FAILURE;
-        }
-
-        $this->info($dryRun ? '🔍 Modo diagnóstico (dry-run)...' : '🔧 Reparando integridad...');
+        $this->info('Diagnóstico de integridad; no se aplicarán ajustes automáticos.');
 
         $results = $service->repairInventoryIntegrity($userId ?? 'system', $dryRun);
 
@@ -32,10 +27,10 @@ class RepairInventoryIntegrity extends Command
         }
 
         $this->table(
-            ['Insumo', 'Stock Actual', 'Calculado', 'Desfase', 'Reparado'],
+            ['Insumo', 'Stock Actual', 'Calculado', 'Desfase', 'Estado'],
             $needsRepair->map(fn($r) => [
                 $r['supply_name'], $r['current_stock'], $r['calculated_stock'],
-                $r['difference'], $r['repaired'] ? '✅' : '⏸️ (dry-run)',
+                $r['difference'], 'Revisar documentos',
             ])->toArray()
         );
 

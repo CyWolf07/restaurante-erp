@@ -81,12 +81,17 @@
                         <div style="margin-top:0.75rem;display:flex;flex-direction:column;gap:0.5rem;">
                             <form method="POST" action="{{ route('admin.purchase', $supply) }}">
                                 @csrf
-                                <input type="number" step="0.0001" name="quantity" class="form-input" placeholder="Cantidad compra" required>
+                                <input type="hidden" name="operation_key" value="{{ (string) Illuminate\Support\Str::uuid() }}">
+                                <input type="number" step="0.0001" name="quantity" class="form-input" placeholder="Cantidad compra" min="0.0001" max="99999999.9999" required>
+                                <label class="form-label">Precio pagado por {{ $supply->unit_label }} (COP)</label>
+                                <input type="number" name="unit_value" step="0.01" min="0" max="99999999.99" class="form-input" placeholder="Precio de esta compra" required>
+                                <small>Verifica el precio por unidad, no el total del paquete. Sede: {{ $supply->point ? $supply->point_label : 'Bodega (predeterminada)' }}. Usa Compras para indicar factura, proveedor y sede.</small>
                                 <input type="text" name="description" class="form-input" placeholder="Nota" style="margin-top:0.25rem;">
                                 <button type="submit" class="btn btn-success btn-sm" style="margin-top:0.25rem;">+ Compra</button>
                             </form>
                             <form method="POST" action="{{ route('admin.waste', $supply) }}">
                                 @csrf
+                                <input type="hidden" name="operation_key" value="{{ (string) Illuminate\Support\Str::uuid() }}">
                                 <input type="number" step="0.0001" name="quantity" class="form-input" placeholder="Cantidad merma" required>
                                 <input type="text" name="reason" class="form-input" placeholder="Motivo" style="margin-top:0.25rem;" required>
                                 <button type="submit" class="btn btn-danger btn-sm" style="margin-top:0.25rem;">− Merma</button>

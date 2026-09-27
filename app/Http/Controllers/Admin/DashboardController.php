@@ -53,6 +53,10 @@ class DashboardController extends Controller
         try {
             $report = $monthlyReports->closeMonth(Auth::user(), (int) $data['year'], (int) $data['month']);
 
+            if (! $report->pdf_local_path) {
+                return back()->with('warning', 'El cierre mensual quedó guardado. No se pudo generar el PDF; abre el informe desde el historial para reintentarlo.');
+            }
+
             return redirect()->route('admin.monthly-reports.pdf', $report)
                 ->with('success', 'Cierre mensual generado correctamente.');
         } catch (\RuntimeException $e) {
@@ -106,21 +110,21 @@ class DashboardController extends Controller
             'cost_per_unit' => 'required|numeric|min:0',
             'supplier' => 'nullable|string|max:255',
         ]);
-        Supply::create($data);
+        app(\App\Services\InventoryCatalogService::class)->create($data, $request->user()->id);
         return back()->with('success', 'Insumo creado correctamente.');
     }
 
     public function registerPurchase(Request $request, Supply $supply, InventoryEngine $engine)
     {
-        $request->validate(['quantity' => 'required|numeric|min:0.0001', 'description' => 'nullable|string']);
-        $engine->registerPurchase($supply, $request->quantity, Auth::id(), $request->description);
+        $request->validate(['quantity' => 'required|numeric|decimal:0,4|min:0.0001|max:99999999.9999', 'unit_value' => 'required|numeric|decimal:0,2|min:0|max:99999999.99', 'description' => 'nullable|string|max:1000', 'operation_key' => 'required|uuid']);
+        $engine->registerPurchase($supply, $request->quantity, Auth::id(), $request->description, $request->operation_key, (string) $request->unit_value);
         return back()->with('success', "Compra de {$request->quantity} {$supply->unit_label} registrada.");
     }
 
     public function registerWaste(Request $request, Supply $supply, InventoryEngine $engine)
     {
-        $request->validate(['quantity' => 'required|numeric|min:0.0001', 'reason' => 'required|string|min:3']);
-        $engine->registerWaste($supply, $request->quantity, Auth::id(), $request->reason);
+        $request->validate(['quantity' => 'required|numeric|min:0.0001', 'reason' => 'required|string|min:3', 'operation_key' => 'required|uuid']);
+        $engine->registerWaste($supply, $request->quantity, Auth::id(), $request->reason, $request->operation_key);
         return back()->with('success', "Merma de {$request->quantity} {$supply->unit_label} registrada.");
     }
 

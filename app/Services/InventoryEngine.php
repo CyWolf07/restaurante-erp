@@ -9,7 +9,6 @@ use App\Models\OrderDetail;
 use App\Models\Supply;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class InventoryEngine
 {
@@ -38,15 +37,16 @@ class InventoryEngine
         }
 
         DB::transaction(function () use ($order) {
-            if (!$order->inventory_reserved_at) {
+            if (! $order->inventory_reserved_at) {
                 $this->deductForOrder($order, 'sale_confirmed');
             } else {
                 InventoryLog::where('order_id', $order->id)
                     ->where('type', 'sale_reserved')
+                    ->whereNull('reversed_at')
                     ->update(['type' => 'sale_confirmed']);
             }
 
-            $order->update(['inventory_confirmed_at' => now()]);
+            $order->update(['inventory_confirmed_at' => now(), 'inventory_cost_captured_at' => now()]);
         });
     }
 
@@ -55,24 +55,26 @@ class InventoryEngine
      */
     public function reverseReservation(Order $order): void
     {
-        if (!$order->inventory_reserved_at || $order->inventory_confirmed_at) {
+        if (! $order->inventory_reserved_at || $order->inventory_confirmed_at) {
             return;
         }
 
         DB::transaction(function () use ($order) {
             $logs = InventoryLog::where('order_id', $order->id)
                 ->where('type', 'sale_reserved')
+                ->whereNull('reversed_at')
                 ->get();
 
             if ($logs->isEmpty()) {
                 $logs = InventoryLog::whereIn('order_detail_id', $order->details()->pluck('id'))
                     ->where('type', 'sale_reserved')
+                    ->whereNull('reversed_at')
                     ->get();
             }
 
             foreach ($logs as $log) {
                 $supply = Supply::where('id', $log->supply_id)->lockForUpdate()->first();
-                if (!$supply) {
+                if (! $supply) {
                     continue;
                 }
                 $qty = abs((float) $log->quantity);
@@ -80,15 +82,16 @@ class InventoryEngine
                 $supply->update(['current_stock' => $newStock]);
 
                 InventoryLog::create([
-                    'supply_id'   => $supply->id,
-                    'type'        => 'sale_reversal',
-                    'quantity'    => $qty,
+                    'supply_id' => $supply->id,
+                    'type' => 'sale_reversal',
+                    'quantity' => $qty,
                     'stock_after' => $newStock,
-                    'user_id'     => Auth::id() ?? $order->waiter_id,
-                    'order_id'    => $order->id,
+                    'user_id' => Auth::id() ?? $order->waiter_id,
+                    'order_id' => $order->id,
                     'description' => "Reversión reserva orden mesa {$order->table_number}",
-                    'created_at'  => now(),
+                    'created_at' => now(),
                 ]);
+                $log->update(['reversed_at' => now()]);
             }
 
             $order->update(['inventory_reserved_at' => null]);
@@ -99,18 +102,19 @@ class InventoryEngine
     {
         $order = $detail->order;
 
-        if (!$order || !$order->inventory_reserved_at || $order->inventory_confirmed_at) {
+        if (! $order || ! $order->inventory_reserved_at || $order->inventory_confirmed_at) {
             return;
         }
 
         DB::transaction(function () use ($detail, $order) {
             $logs = InventoryLog::where('order_detail_id', $detail->id)
                 ->where('type', 'sale_reserved')
+                ->whereNull('reversed_at')
                 ->get();
 
             foreach ($logs as $log) {
                 $supply = Supply::where('id', $log->supply_id)->lockForUpdate()->first();
-                if (!$supply) {
+                if (! $supply) {
                     continue;
                 }
 
@@ -119,17 +123,43 @@ class InventoryEngine
                 $supply->update(['current_stock' => $newStock]);
 
                 InventoryLog::create([
-                    'supply_id'       => $supply->id,
-                    'type'            => 'sale_reversal',
-                    'quantity'        => $qty,
-                    'stock_after'     => $newStock,
-                    'user_id'         => Auth::id() ?? $order->waiter_id,
-                    'order_id'        => $order->id,
+                    'supply_id' => $supply->id,
+                    'type' => 'sale_reversal',
+                    'quantity' => $qty,
+                    'stock_after' => $newStock,
+                    'user_id' => Auth::id() ?? $order->waiter_id,
+                    'order_id' => $order->id,
                     'order_detail_id' => $detail->id,
-                    'description'     => "Reversion plato {$detail->product?->name} mesa {$order->table_number}",
-                    'created_at'      => now(),
+                    'description' => "Reversion plato {$detail->product?->name} mesa {$order->table_number}",
+                    'created_at' => now(),
                 ]);
+                $log->update(['reversed_at' => now()]);
             }
+        });
+    }
+
+    public function reserveForDetail(OrderDetail $detail): void
+    {
+        $order = $detail->order;
+
+        if (! $order || $order->inventory_confirmed_at) {
+            return;
+        }
+
+        if (! $order->inventory_reserved_at) {
+            $this->reserveForOrder($order->fresh(['details.product.recipes.supply', 'details.modifiers.modifier.supply']));
+
+            return;
+        }
+
+        DB::transaction(function () use ($detail, $order) {
+            $detail->loadMissing([
+                'product.recipes.supply',
+                'modifiers.modifier.supply',
+            ]);
+
+            $this->deductRecipeIngredients($detail, $order, 'sale_reserved');
+            $this->deductModifierIngredients($detail, $order, 'sale_reserved');
         });
     }
 
@@ -151,13 +181,13 @@ class InventoryEngine
 
     private function deductRecipeIngredients($detail, Order $order, string $type): void
     {
-        if (!$detail->product?->recipes) {
+        if (! $detail->product?->recipes) {
             return;
         }
 
         foreach ($detail->product->recipes as $recipe) {
             $supply = $recipe->supply;
-            if (!$supply) {
+            if (! $supply) {
                 continue;
             }
 
@@ -178,12 +208,12 @@ class InventoryEngine
     {
         foreach ($detail->modifiers ?? [] as $orderModifier) {
             $modifier = $orderModifier->modifier;
-            if (!$modifier?->affectsInventory()) {
+            if (! $modifier?->affectsInventory()) {
                 continue;
             }
 
             $supply = $modifier->supply;
-            if (!$supply) {
+            if (! $supply) {
                 continue;
             }
 
@@ -211,7 +241,7 @@ class InventoryEngine
     ): void {
         $lockedSupply = Supply::where('id', $supply->id)->lockForUpdate()->first();
 
-        if (!$lockedSupply) {
+        if (! $lockedSupply) {
             throw new \RuntimeException("Insumo no encontrado: {$supply->id}");
         }
 
@@ -219,15 +249,16 @@ class InventoryEngine
         $lockedSupply->update(['current_stock' => $newStock]);
 
         InventoryLog::create([
-            'supply_id'       => $lockedSupply->id,
-            'type'            => $type,
-            'quantity'        => -$quantity,
-            'stock_after'     => $newStock,
-            'user_id'         => $userId,
-            'order_id'        => $orderId,
+            'supply_id' => $lockedSupply->id,
+            'type' => $type,
+            'quantity' => -$quantity,
+            'stock_after' => $newStock,
+            'unit_cost' => $lockedSupply->cost_per_unit,
+            'user_id' => $userId,
+            'order_id' => $orderId,
             'order_detail_id' => $orderDetailId,
-            'description'     => $description,
-            'created_at'      => now(),
+            'description' => $description,
+            'created_at' => now(),
         ]);
 
         if ($newStock <= $lockedSupply->min_stock) {
@@ -235,45 +266,47 @@ class InventoryEngine
         }
     }
 
-    public function registerPurchase(Supply $supply, float $quantity, string $userId, ?string $description = null): void
+    public function registerPurchase(Supply $supply, float $quantity, string $userId, ?string $description = null, ?string $operationKey = null, ?string $unitValue = null): void
     {
-        DB::transaction(function () use ($supply, $quantity, $userId, $description) {
-            $lockedSupply = Supply::where('id', $supply->id)->lockForUpdate()->first();
-            $newStock = (float) $lockedSupply->current_stock + $quantity;
-            $lockedSupply->update(['current_stock' => $newStock]);
-
-            InventoryLog::create([
-                'supply_id'   => $lockedSupply->id,
-                'type'        => 'supplier_purchase',
-                'quantity'    => $quantity,
-                'stock_after' => $newStock,
-                'user_id'     => $userId,
-                'description' => $description ?? "Compra: +{$quantity}{$lockedSupply->unit_label}",
-                'created_at'  => now(),
-            ]);
-        });
+        $this->validateQuantity($quantity);
+        app(InventoryPurchaseService::class)->registerQuick($supply, $quantity, $userId, $description, $operationKey, $unitValue);
     }
 
-    public function registerWaste(Supply $supply, float $quantity, string $userId, string $reason): void
+    public function registerWaste(Supply $supply, float $quantity, string $userId, string $reason, ?string $operationKey = null): void
     {
-        DB::transaction(function () use ($supply, $quantity, $userId, $reason) {
+        $this->validateQuantity($quantity);
+        app(PosOperationService::class)->run(function () use ($supply, $quantity, $userId, $reason, $operationKey) {
+            $requests = app(InventoryRequestService::class);
+            $metadata = $requests->metadata($operationKey, $userId, ['type' => 'manual_waste', 'supply_id' => $supply->id, 'quantity' => $quantity, 'reason' => $reason]);
+            if ($requests->existing($metadata)) { return; }
             $lockedSupply = Supply::where('id', $supply->id)->lockForUpdate()->first();
             $newStock = (float) $lockedSupply->current_stock - $quantity;
+            if ($newStock < 0) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['quantity' => 'La merma supera las existencias disponibles.']);
+            }
             $lockedSupply->update(['current_stock' => $newStock]);
 
-            InventoryLog::create([
-                'supply_id'   => $lockedSupply->id,
-                'type'        => 'manual_waste',
-                'quantity'    => -$quantity,
+            InventoryLog::create($metadata + [
+                'supply_id' => $lockedSupply->id,
+                'type' => 'manual_waste',
+                'unit_cost' => $lockedSupply->cost_per_unit,
+                'quantity' => -$quantity,
                 'stock_after' => $newStock,
-                'user_id'     => $userId,
+                'user_id' => $userId,
                 'description' => "Merma: {$reason}",
-                'created_at'  => now(),
+                'created_at' => now(),
             ]);
 
             if ($newStock <= $lockedSupply->min_stock) {
                 event(new SupplyStockLow($lockedSupply));
             }
-        });
+        }, false);
+    }
+
+    private function validateQuantity(float $quantity): void
+    {
+        if (! is_finite($quantity) || $quantity < 0.0001) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['quantity' => 'La cantidad debe ser positiva.']);
+        }
     }
 }

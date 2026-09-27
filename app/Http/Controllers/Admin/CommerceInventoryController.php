@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Supply;
 use App\Services\CommerceInventoryMetricsService;
 use App\Services\InventoryPurchaseService;
+use App\Services\InventoryCatalogService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
@@ -24,8 +25,8 @@ class CommerceInventoryController extends Controller
         if ($request->filled('q')) {
             $q = $request->q;
             $query->where(function ($b) use ($q) {
-                $b->where('code', 'ilike', "%{$q}%")
-                  ->orWhere('name', 'ilike', "%{$q}%");
+                $b->whereLike('code', "%{$q}%")
+                  ->orWhereLike('name', "%{$q}%");
             });
         }
 
@@ -54,7 +55,7 @@ class CommerceInventoryController extends Controller
         $data['cost_per_unit'] = $data['cost_per_unit'] ?? $data['pvp'];
         $data['active'] = true;
 
-        Supply::create($data);
+        app(InventoryCatalogService::class)->create($data, $request->user()->id);
 
         return redirect()->route('admin.inventory.index', ['tab' => 'inventario'])
             ->with('success', "Producto {$data['code']} registrado en inventario.");
@@ -67,12 +68,24 @@ class CommerceInventoryController extends Controller
         $data['active'] = $request->boolean('active');
         $data['department_number'] = $data['department_number'] ?? null;
 
-        $supply->update($data);
+        app(InventoryCatalogService::class)->update($supply, $data);
 
         return redirect()
             ->back()
             ->with('success', "Producto {$supply->code} actualizado correctamente.")
             ->with('open_edit', $supply->id);
+    }
+
+    public function adjust(Request $request, Supply $supply, InventoryCatalogService $catalog)
+    {
+        $data = $request->validate([
+            'quantity' => 'required|numeric|not_in:0',
+            'expected_stock' => 'required|numeric',
+            'reason' => 'required|string|min:5|max:500',
+        ]);
+        $catalog->adjust($supply, (float) $data['quantity'], (float) $data['expected_stock'], $data['reason'], $request->user()->id);
+
+        return back()->with('success', 'Ajuste registrado con su motivo y responsable.');
     }
 
     private function validateProduct(Request $request, ?Supply $supply = null): array
@@ -103,6 +116,7 @@ class CommerceInventoryController extends Controller
     public function destroy(Supply $supply)
     {
         $hasHistory = $supply->inventoryLogs()->exists()
+            || \App\Models\ProductionOrder::where('output_supply_id', $supply->id)->exists()
             || $supply->purchases()->exists()
             || $supply->recipes()->exists()
             || $supply->physicalInventoryDetails()->exists();
@@ -124,6 +138,7 @@ class CommerceInventoryController extends Controller
     {
         $data = $request->validate([
             'code'            => 'required|string|exists:supplies,code',
+            'operation_key'   => 'required|uuid',
             'supplier'        => 'required|string|max:255',
             'purchase_date'   => 'required|date',
             'adjustment_type' => 'required|in:compra,bonificacion,inventario,reposicion',

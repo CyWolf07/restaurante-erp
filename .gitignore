@@ -23,6 +23,7 @@
 /storage/framework/sessions/*
 /storage/framework/testing/*
 /storage/framework/views/*
+/storage/framework/compiled_views/*
 /storage/*.key
 /storage/pail
 /vendor

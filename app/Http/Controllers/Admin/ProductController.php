@@ -13,9 +13,12 @@ use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $products = Product::with(['category', 'recipes.supply'])->orderBy('sort_order')->orderBy('name')->get();
+        $data = $request->validate(['q' => 'nullable|string|max:100']);
+        $products = Product::with(['category', 'recipes.supply'])
+            ->when($data['q'] ?? null, fn ($query, $term) => $query->whereLike('name', '%'.$term.'%'))
+            ->orderBy('sort_order')->orderBy('name')->paginate(25)->withQueryString();
         $categories = ProductCategory::orderBy('sort_order')->get();
         $supplies = Supply::active()->orderBy('name')->get();
 
@@ -32,8 +35,12 @@ class ProductController extends Controller
             $data['image_path'] = $request->file('image')->store('products', 'public');
         }
 
-        $product = Product::create($data);
-        $this->syncRecipes($product, $request->input('recipes', []));
+        $product = DB::transaction(function () use ($data, $request) {
+            $product = Product::create($data);
+            $this->syncRecipes($product, $request->input('recipes', []));
+            app(\App\Services\AuditService::class)->record('product', $product->id, 'product_created', ['name' => $product->name, 'recipes' => $request->input('recipes', [])]);
+            return $product;
+        });
 
         return back()->with('success', "Plato «{$product->name}» creado.");
     }
@@ -43,14 +50,26 @@ class ProductController extends Controller
         $data = $this->validateProduct($request, $product);
 
         if ($request->hasFile('image')) {
-            if ($product->image_path) {
-                Storage::disk('public')->delete($product->image_path);
-            }
             $data['image_path'] = $request->file('image')->store('products', 'public');
         }
 
-        $product->update($data);
-        $this->syncRecipes($product, $request->input('recipes', []));
+        $oldImage = $product->image_path;
+        DB::transaction(function () use ($product, $data, $request) {
+            $locked = Product::whereKey($product->id)->lockForUpdate()->firstOrFail();
+            $before = ['name' => $locked->name, 'price' => $locked->price, 'recipes' => $locked->recipes()->get(['supply_id', 'quantity_required'])->toArray()];
+            $locked->update($data);
+            if ($request->exists('recipes') || $request->boolean('replace_recipes')) {
+                $this->syncRecipes($locked, $request->input('recipes', []));
+                $locked->increment('recipe_version');
+            }
+            app(\App\Services\AuditService::class)->record('product', $locked->id, 'product_updated', [
+                'before' => $before, 'after' => ['name' => $locked->name, 'price' => $locked->price,
+                    'recipe_version' => $locked->recipe_version, 'recipes' => $locked->recipes()->get(['supply_id', 'quantity_required'])->toArray()],
+            ]);
+        });
+        if (isset($data['image_path']) && $oldImage) {
+            Storage::disk('public')->delete($oldImage);
+        }
 
         return back()->with('success', "Plato «{$product->name}» actualizado.");
     }
@@ -68,11 +87,15 @@ class ProductController extends Controller
             'category_id'          => 'nullable|exists:product_categories,id',
             'name'                 => 'required|string|max:255',
             'description'          => 'nullable|string',
-            'price'                => 'required|numeric|min:0',
+            'price'                => 'required|numeric|decimal:0,2|min:0|max:9999999999.99',
             'preparation_time'     => 'required|integer|min:0',
             'recipe_instructions'  => 'nullable|string',
             'active'               => 'sometimes|boolean',
             'image'                => 'nullable|image|max:4096',
+            'recipes' => 'sometimes|array',
+            'replace_recipes' => 'sometimes|boolean',
+            'recipes.*.supply_id' => 'required|uuid|distinct|exists:supplies,id',
+            'recipes.*.quantity_required' => 'required|numeric|min:0.0001',
         ]);
     }
 

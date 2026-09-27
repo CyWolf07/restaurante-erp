@@ -27,7 +27,7 @@ class UserFactory extends Factory
         return [
             'name' => fake()->name(),
             'email' => fake()->unique()->safeEmail(),
-            'pin_code' => (string) fake()->numerify('####'),
+            'pin_code' => (string) fake()->unique()->numerify('######'),
             'role' => 'waiter',
             'active' => true,
             'email_verified_at' => now(),

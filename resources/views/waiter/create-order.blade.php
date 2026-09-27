@@ -34,6 +34,24 @@
     .modifier-list { margin-top: 0.5rem; padding-left: 1rem; }
     .modifier-check { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; font-size: 0.8rem; }
     .modifier-check input { width: 18px; height: 18px; cursor: pointer; accent-color: var(--accent); }
+
+    /* Options Modal */
+    .options-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; align-items:center; justify-content:center; }
+    .options-overlay.show { display:flex; }
+    .options-modal { background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius-lg); padding:1.5rem; width:480px; max-width:95vw; max-height:85vh; overflow-y:auto; }
+    .opt-group-label { font-size:0.65rem; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin:0.75rem 0 0.4rem; }
+    .opt-group-label:first-child { margin-top:0; }
+    .opt-chips { display:flex; flex-wrap:wrap; gap:0.4rem; }
+    .opt-chip {
+        display:inline-flex; align-items:center; gap:0.35rem; padding:0.4rem 0.8rem; border-radius:999px;
+        font-size:0.8rem; font-weight:600; border:1px solid var(--border); background:var(--bg-input);
+        cursor:pointer; transition:var(--transition); user-select:none;
+    }
+    .opt-chip.active { background:rgba(99,102,241,0.25); border-color:var(--accent); color:var(--accent-hover); }
+    .opt-chip:hover { border-color:var(--accent-hover); }
+    .opt-chip.radio-mode.active { background:rgba(34,197,94,0.2); border-color:var(--success); color:var(--success); }
+    .cart-options { display:flex; flex-wrap:wrap; gap:0.3rem; margin-top:0.25rem; }
+    .cart-option-tag { font-size:0.65rem; padding:0.15rem 0.45rem; border-radius:999px; background:rgba(99,102,241,0.15); color:var(--accent-hover); }
 </style>
 @endpush
 @section('content')
@@ -55,7 +73,7 @@
         <div class="product-grid" id="product-grid">
             @foreach($categories as $cat)
             @foreach($cat->products as $product)
-            <div class="product-card" data-category="{{ $cat->id }}" onclick="addToCart('{{ $product->id }}', '{{ addslashes($product->name) }}', {{ $product->price }})">
+            <div class="product-card" data-category="{{ $cat->id }}" onclick="onProductClick('{{ $product->id }}', '{{ addslashes($product->name) }}', {{ $product->price }})">
                 <div class="product-card-img">🍽️</div>
                 <div class="product-card-body">
                     <div class="product-card-name">{{ $product->name }}</div>
@@ -71,7 +89,7 @@
         <div class="card" style="position:sticky;top:2rem;">
             <h3 style="font-size:1rem;font-weight:800;margin-bottom:0.5rem;">🛒 Orden Actual</h3>
             <div class="form-group">
-                <label class="form-label">Mesa</label>
+                <label class="form-label">{{ str_contains($screenTitle ?? '', 'Domicilio') ? 'Domicilio' : 'Mesa' }}</label>
                 <select class="form-select" id="table-select" required>
                     @foreach($tables as $t)
                     @php $busy = $t->activeOrder(); @endphp
@@ -96,12 +114,30 @@
     </div>
 </div>
 
-{{-- Modifiers data --}}
-<script>const modifiersData = @json($modifiers);</script>
+{{-- Modal de opciones de plato --}}
+<div class="options-overlay" id="options-overlay">
+    <div class="options-modal">
+        <h3 style="font-weight:700;margin-bottom:0.25rem;" id="options-product-name"></h3>
+        <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1rem;">Selecciona las opciones de preparación</p>
+        <div id="options-container"></div>
+        <div class="form-group" style="margin-top:1rem;">
+            <label class="form-label">Otros / Comentarios cocina</label>
+            <input type="text" class="form-input" id="options-comments" placeholder="Escribir instrucciones especiales...">
+        </div>
+        <div style="display:flex;gap:0.75rem;justify-content:flex-end;margin-top:1rem;">
+            <button class="btn btn-ghost" onclick="closeOptionsModal()">Cancelar</button>
+            <button class="btn btn-primary" onclick="confirmOptions()">✓ Agregar al carrito</button>
+        </div>
+    </div>
+</div>
 @endsection
 @push('scripts')
 <script>
+// Datos de opciones por producto (generados desde PHP)
+const productOptionsData = @json($productOptions);
+
 let cart = [];
+let pendingProduct = null; // {id, name, price}
 
 function formatCop(n) {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
@@ -115,10 +151,66 @@ function filterCategory(catId, btn) {
     });
 }
 
-function addToCart(id, name, price) {
-    const existing = cart.find(i => i.product_id === id);
-    if (existing) { existing.quantity++; }
-    else { cart.push({ product_id: id, name, price, quantity: 1, comments: '', modifiers: [] }); }
+function onProductClick(id, name, price) {
+    const options = productOptionsData[id] || {};
+    const hasOptions = Object.keys(options).length > 0;
+
+    if (!hasOptions) {
+        addToCart(id, name, price, [], '');
+        return;
+    }
+
+    // Abrir modal de opciones
+    pendingProduct = { id, name, price };
+    document.getElementById('options-product-name').textContent = '🍽️ ' + name;
+    document.getElementById('options-comments').value = '';
+
+    const container = document.getElementById('options-container');
+    let html = '';
+    for (const [group, opts] of Object.entries(options)) {
+        const isSoup = group.toLowerCase() === 'sopa';
+        html += `<div class="opt-group-label">${isSoup ? '🍲' : group.toLowerCase().startsWith('sin') ? '❌' : group.toLowerCase().startsWith('extra') ? '➕' : '🔧'} ${group}</div>`;
+        html += `<div class="opt-chips" data-group="${group}" data-mode="${isSoup ? 'radio' : 'check'}">`;
+        for (const opt of opts) {
+            html += `<label class="opt-chip ${isSoup ? 'radio-mode' : ''}" data-id="${opt.id}" data-group="${group}" onclick="toggleOpt(this, '${isSoup ? 'radio' : 'check'}')">
+                ${opt.name}
+            </label>`;
+        }
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+    document.getElementById('options-overlay').classList.add('show');
+}
+
+function toggleOpt(chip, mode) {
+    if (mode === 'radio') {
+        // Solo uno por grupo
+        const group = chip.dataset.group;
+        document.querySelectorAll(`.opt-chip[data-group="${group}"]`).forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+    } else {
+        chip.classList.toggle('active');
+    }
+}
+
+function closeOptionsModal() {
+    document.getElementById('options-overlay').classList.remove('show');
+    pendingProduct = null;
+}
+
+function confirmOptions() {
+    if (!pendingProduct) return;
+    const selectedOptions = [];
+    document.querySelectorAll('.opt-chip.active').forEach(chip => {
+        selectedOptions.push({ modifier_id: chip.dataset.id, name: chip.textContent.trim() });
+    });
+    const comments = document.getElementById('options-comments').value.trim();
+    addToCart(pendingProduct.id, pendingProduct.name, pendingProduct.price, selectedOptions, comments);
+    closeOptionsModal();
+}
+
+function addToCart(id, name, price, options, comments) {
+    cart.push({ product_id: id, name, price, quantity: 1, comments: comments || '', modifiers: options || [] });
     renderCart();
 }
 
@@ -140,10 +232,16 @@ function renderCart() {
     cart.forEach((item, i) => {
         const subtotal = item.price * item.quantity;
         total += subtotal;
+        let optionsHtml = '';
+        if (item.modifiers.length > 0) {
+            optionsHtml = '<div class="cart-options">' + item.modifiers.map(m => `<span class="cart-option-tag">${m.name}</span>`).join('') + '</div>';
+        }
         html += `<div class="cart-item">
             <div style="flex:1;">
                 <div style="font-weight:600;font-size:0.85rem;">${item.name}</div>
                 <div style="font-size:0.75rem;color:var(--text-muted);">${formatCop(item.price)} c/u</div>
+                ${optionsHtml}
+                ${item.comments ? `<div style="font-size:0.7rem;color:var(--warning);margin-top:0.2rem;">💬 ${item.comments}</div>` : ''}
                 <input type="text" class="form-input" style="margin-top:0.4rem;padding:0.3rem 0.5rem;font-size:0.75rem;" placeholder="Comentarios cocina..." value="${item.comments}" onchange="cart[${i}].comments=this.value;">
             </div>
             <div class="cart-item-qty">
@@ -170,7 +268,15 @@ function submitOrder() {
     cart.forEach((item, i) => {
         form.innerHTML += `<input type="hidden" name="items[${i}][product_id]" value="${item.product_id}">`;
         form.innerHTML += `<input type="hidden" name="items[${i}][quantity]" value="${item.quantity}">`;
-        form.innerHTML += `<input type="hidden" name="items[${i}][comments]" value="${item.comments}">`;
+        // Combinar opciones seleccionadas con comentarios
+        let fullComments = item.modifiers.map(m => m.name).join(', ');
+        if (item.comments) fullComments += (fullComments ? ' | ' : '') + item.comments;
+        form.innerHTML += `<input type="hidden" name="items[${i}][comments]" value="${fullComments}">`;
+        // Enviar modificadores como IDs
+        item.modifiers.forEach((mod, j) => {
+            form.innerHTML += `<input type="hidden" name="items[${i}][modifiers][${j}][modifier_id]" value="${mod.modifier_id}">`;
+            form.innerHTML += `<input type="hidden" name="items[${i}][modifiers][${j}][quantity]" value="1">`;
+        });
     });
     document.body.appendChild(form);
     form.submit();

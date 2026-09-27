@@ -18,11 +18,16 @@ class InventoryLog extends Model
         'type',
         'quantity',
         'stock_after',
+        'unit_cost',
+        'operation_key',
+        'operation_signature',
         'user_id',
         'order_id',
+        'production_order_id',
         'order_detail_id',
         'description',
         'created_at',
+        'reversed_at',
     ];
 
     protected function casts(): array
@@ -30,7 +35,9 @@ class InventoryLog extends Model
         return [
             'quantity'    => 'decimal:4',
             'stock_after' => 'decimal:4',
+            'unit_cost' => 'decimal:4',
             'created_at'  => 'datetime',
+            'reversed_at' => 'datetime',
         ];
     }
 
@@ -60,6 +67,8 @@ class InventoryLog extends Model
             'manual_waste'          => 'Merma Manual',
             'supplier_purchase'     => 'Compra a Proveedor',
             'programmer_adjustment' => 'Ajuste Programador',
+            'production_consumption' => 'Consumo de producción',
+            'production_output' => 'Entrada de producción',
             default                 => $this->type,
         };
     }

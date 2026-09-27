@@ -32,9 +32,8 @@ class StaffUserController extends Controller
         if ($request->filled('q')) {
             $q = $request->q;
             $query->where(function ($b) use ($q) {
-                $b->where('name', 'ilike', "%{$q}%")
-                  ->orWhere('email', 'ilike', "%{$q}%")
-                  ->orWhere('pin_code', 'like', "%{$q}%");
+                $b->whereLike('name', "%{$q}%")
+                  ->orWhereLike('email', "%{$q}%");
             });
         }
 
@@ -47,9 +46,12 @@ class StaffUserController extends Controller
 
     public function store(Request $request)
     {
-        $data = $this->validateStaff($request);
-
-        User::create($data);
+        $data = app(\App\Services\PosOperationService::class)->run(function () use ($request) {
+            $data = $this->validateStaff($request);
+            $created = User::create($data);
+            app(\App\Services\AuditService::class)->record('user', $created->id, 'staff_created', ['name' => $created->name, 'role' => $created->role]);
+            return $data;
+        }, false);
 
         return back()->with('success', "{$data['name']} registrado como " . config("restaurant.staff_roles.{$data['role']}") . '.');
     }
@@ -58,9 +60,16 @@ class StaffUserController extends Controller
     {
         $this->ensureStaffUser($user);
 
-        $data = $this->validateStaff($request, $user);
-
-        $user->update($data);
+        app(\App\Services\PosOperationService::class)->run(function () use ($request, $user) {
+            $user->refresh();
+            $before = $user->only(['name', 'email', 'role', 'active']);
+            $data = $this->validateStaff($request, $user);
+            $user->update($data);
+            app(\App\Services\AuditService::class)->record('user', $user->id, 'staff_updated', [
+                'before' => $before, 'after' => $user->only(['name', 'email', 'role', 'active']),
+                'credentials_changed' => array_key_exists('pin_code', $data) || array_key_exists('password', $data),
+            ]);
+        }, false);
 
         return back()->with('success', "Usuario {$user->name} actualizado.");
     }
@@ -73,14 +82,11 @@ class StaffUserController extends Controller
             return back()->with('error', 'No puedes eliminar tu propia cuenta desde aquí.');
         }
 
-        if ($user->ordersAsWaiter()->exists() || $user->ordersAsCashier()->exists()) {
-            $user->update(['active' => false, 'pin_code' => null]);
-            return back()->with('success', "Usuario {$user->name} desactivado (tiene historial de órdenes).");
-        }
-
-        $user->delete();
-
-        return back()->with('success', "Usuario {$user->name} eliminado.");
+        app(\App\Services\PosOperationService::class)->run(function () use ($user) {
+            $user->forceFill(['active' => false, 'pin_code' => null, 'remember_token' => null])->save();
+            app(\App\Services\AuditService::class)->record('user', $user->id, 'staff_deactivated', ['name' => $user->name]);
+        }, false);
+        return back()->with('success', "Usuario {$user->name} desactivado. Su historial se conserva.");
     }
 
     private function ensureStaffUser(User $user): void
@@ -104,8 +110,8 @@ class StaffUserController extends Controller
         $authType = $request->input('auth_type', 'pin');
 
         if (in_array($authType, ['pin', 'both'], true)) {
-            $pinRules = ['string', 'regex:/^\d{4,6}$/', Rule::unique('users', 'pin_code')->ignore($user?->id)];
-            array_unshift($pinRules, $user ? 'nullable' : 'required');
+            $pinRules = ['string', 'regex:/^\d{4,6}$/'];
+            array_unshift($pinRules, $user?->hasPin() ? 'nullable' : 'required');
             $rules['pin_code'] = $pinRules;
         } else {
             $rules['pin_code'] = 'nullable';
@@ -118,7 +124,7 @@ class StaffUserController extends Controller
                 'max:255',
                 Rule::unique('users', 'email')->ignore($user?->id),
             ];
-            $rules['password'] = $user
+            $rules['password'] = $user?->password
                 ? 'nullable|string|min:6|confirmed'
                 : 'required|string|min:6|confirmed';
         } else {

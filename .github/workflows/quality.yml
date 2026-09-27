@@ -1,0 +1,50 @@
+name: Calidad SQLite y PostgreSQL
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        database: [sqlite, pgsql]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: restaurant_test
+          POSTGRES_USER: restaurant_test
+          POSTGRES_PASSWORD: test_only
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      APP_ENV: testing
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DB_CONNECTION: ${{ matrix.database }}
+      DB_DATABASE: ${{ matrix.database == 'sqlite' && ':memory:' || 'restaurant_test' }}
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USERNAME: restaurant_test
+      DB_PASSWORD: test_only
+      DB_URL: ''
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_sqlite, sqlite3, pdo_pgsql, mbstring, gd, zip
+          coverage: none
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer audit --locked --no-interaction
+      - run: php artisan test
+      - run: php artisan view:cache
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=moderate
+      - run: pnpm run verify-deps
+      - run: pnpm run build

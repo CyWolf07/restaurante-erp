@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\MonthlyReport;
-use App\Models\Product;
 use App\Models\User;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Carbon;
@@ -39,6 +38,9 @@ class MonthlyReportService
     public function closeMonth(User $admin, int $year, int $month): MonthlyReport
     {
         $period = $this->resolvePeriod($year, $month);
+        if ($period['from']->copy()->endOfMonth()->greaterThanOrEqualTo(now())) {
+            throw new \RuntimeException('Solo se pueden cerrar meses que ya terminaron.');
+        }
 
         if (MonthlyReport::where('period_year', $year)->where('period_month', $month)->exists()) {
             throw new \RuntimeException('Este mes ya fue cerrado.');
@@ -46,7 +48,7 @@ class MonthlyReportService
 
         $snapshot = $this->buildSnapshot($period['from'], $period['to']);
 
-        return DB::transaction(function () use ($admin, $period, $snapshot) {
+        $report = DB::transaction(function () use ($admin, $period, $snapshot) {
             $report = new MonthlyReport([
                 'period_year'           => $period['year'],
                 'period_month'          => $period['month'],
@@ -63,10 +65,17 @@ class MonthlyReportService
             $report->snapshot_data = $snapshot;
             $report->save();
 
-            $report->update(['pdf_local_path' => $this->generatePdf($report)]);
-
             return $report->fresh('closer');
         });
+
+        // The persisted snapshot remains available if rendering fails; opening the report retries the PDF.
+        try {
+            $this->regeneratePdf($report);
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+
+        return $report->fresh('closer');
     }
 
     public function regeneratePdf(MonthlyReport $report): string
@@ -81,7 +90,7 @@ class MonthlyReportService
     {
         $ordersBase = DB::table('orders')
             ->where('status', 'paid')
-            ->whereBetween('created_at', [$from, $to]);
+            ->whereBetween(DB::raw('COALESCE(inventory_confirmed_at, created_at)'), [$from, $to]);
 
         $totals = [
             'sales' => round((float) (clone $ordersBase)->sum('subtotal'), 2),
@@ -91,7 +100,7 @@ class MonthlyReportService
             'products_sold' => (int) DB::table('order_details')
                 ->join('orders', 'orders.id', '=', 'order_details.order_id')
                 ->where('orders.status', 'paid')
-                ->whereBetween('orders.created_at', [$from, $to])
+                ->whereBetween(DB::raw('COALESCE(orders.inventory_confirmed_at, orders.created_at)'), [$from, $to])
                 ->sum('order_details.quantity'),
         ];
 
@@ -106,6 +115,8 @@ class MonthlyReportService
 
         $ingredientCost = round((float) collect($products)->sum('ingredient_cost'), 2);
         $totals['ingredient_cost'] = $ingredientCost;
+        $totals['cost_incomplete'] = (clone $ordersBase)->whereNull('inventory_cost_captured_at')->exists()
+            || collect($products)->contains(fn ($row) => $row['cost_incomplete']);
         $totals['gross_profit'] = round($totals['sales'] - $ingredientCost, 2);
         $totals['profit_margin'] = $totals['sales'] > 0
             ? round(($totals['gross_profit'] / $totals['sales']) * 100, 2)
@@ -202,7 +213,7 @@ class MonthlyReportService
             ->join('products', 'products.id', '=', 'order_details.product_id')
             ->leftJoin('product_categories', 'product_categories.id', '=', 'products.category_id')
             ->where('orders.status', 'paid')
-            ->whereBetween('orders.created_at', [$from, $to])
+            ->whereBetween(DB::raw('COALESCE(orders.inventory_confirmed_at, orders.created_at)'), [$from, $to])
             ->select(
                 'products.id',
                 'products.name',
@@ -214,18 +225,20 @@ class MonthlyReportService
             ->orderByDesc(DB::raw('SUM(order_details.quantity)'))
             ->get();
 
-        $recipeCosts = Product::with('recipes.supply')
-            ->whereIn('id', $rows->pluck('id'))
-            ->get()
-            ->mapWithKeys(function (Product $product) {
-                $cost = $product->recipes->sum(fn($recipe) => (float) $recipe->quantity_required * (float) ($recipe->supply?->cost_per_unit ?? 0));
-                return [$product->id => $cost];
-            });
+        $costs = DB::table('inventory_logs as logs')
+            ->join('order_details as details', 'details.id', '=', 'logs.order_detail_id')
+            ->join('orders', 'orders.id', '=', 'details.order_id')
+            ->where('orders.status', 'paid')
+            ->whereBetween(DB::raw('COALESCE(orders.inventory_confirmed_at, orders.created_at)'), [$from, $to])
+            ->whereIn('logs.type', ['sale_confirmed', 'sale_consumption'])
+            ->whereNull('logs.reversed_at')
+            ->selectRaw('details.product_id, SUM(ABS(logs.quantity) * logs.unit_cost) as cost, SUM(CASE WHEN logs.unit_cost IS NULL THEN 1 ELSE 0 END) as missing')
+            ->groupBy('details.product_id')->get()->keyBy('product_id');
 
-        return $rows->map(function ($row) use ($recipeCosts) {
+        return $rows->map(function ($row) use ($costs) {
             $quantity = (int) $row->quantity;
-            $unitCost = (float) ($recipeCosts[$row->id] ?? 0);
-            $ingredientCost = round($quantity * $unitCost, 2);
+            $cost = $costs->get($row->id);
+            $ingredientCost = round((float) ($cost->cost ?? 0), 2);
             $sales = round((float) $row->sales, 2);
 
             return [
@@ -235,6 +248,7 @@ class MonthlyReportService
                 'quantity' => $quantity,
                 'sales' => $sales,
                 'ingredient_cost' => $ingredientCost,
+                'cost_incomplete' => (int) ($cost->missing ?? 0) > 0,
                 'gross_profit' => round($sales - $ingredientCost, 2),
             ];
         })->values()->toArray();
@@ -244,16 +258,19 @@ class MonthlyReportService
     {
         return DB::table('inventory_logs')
             ->join('supplies', 'supplies.id', '=', 'inventory_logs.supply_id')
-            ->where('inventory_logs.type', 'sale_consumption')
-            ->whereBetween('inventory_logs.created_at', [$from, $to])
+            ->whereIn('inventory_logs.type', ['sale_confirmed', 'sale_consumption'])
+            ->join('orders', 'orders.id', '=', 'inventory_logs.order_id')
+            ->where('orders.status', 'paid')
+            ->whereNull('inventory_logs.reversed_at')
+            ->whereBetween(DB::raw('COALESCE(orders.inventory_confirmed_at, orders.created_at)'), [$from, $to])
             ->select(
                 'supplies.id',
                 'supplies.name',
                 'supplies.unit_type',
-                'supplies.cost_per_unit',
+                DB::raw('SUM(ABS(inventory_logs.quantity) * inventory_logs.unit_cost) as historical_cost'),
                 DB::raw('ABS(SUM(inventory_logs.quantity)) as quantity_used')
             )
-            ->groupBy('supplies.id', 'supplies.name', 'supplies.unit_type', 'supplies.cost_per_unit')
+            ->groupBy('supplies.id', 'supplies.name', 'supplies.unit_type')
             ->orderByDesc(DB::raw('ABS(SUM(inventory_logs.quantity))'))
             ->get()
             ->map(fn($row) => [
@@ -261,7 +278,7 @@ class MonthlyReportService
                 'supply' => $row->name,
                 'unit' => $this->unitLabel($row->unit_type),
                 'quantity_used' => round((float) $row->quantity_used, 4),
-                'estimated_cost' => round((float) $row->quantity_used * (float) $row->cost_per_unit, 2),
+                'estimated_cost' => round((float) $row->historical_cost, 2),
             ])
             ->toArray();
     }
@@ -270,7 +287,7 @@ class MonthlyReportService
     {
         return DB::table('orders')
             ->where('status', 'paid')
-            ->whereBetween('created_at', [$from, $to])
+            ->whereBetween(DB::raw('COALESCE(inventory_confirmed_at, created_at)'), [$from, $to])
             ->select(
                 'table_number',
                 DB::raw('COUNT(*) as orders_count'),
@@ -293,13 +310,13 @@ class MonthlyReportService
     {
         $rows = DB::table('orders')
             ->where('status', 'paid')
-            ->whereBetween('created_at', [$from, $to])
+            ->whereBetween(DB::raw('COALESCE(inventory_confirmed_at, created_at)'), [$from, $to])
             ->select(
-                DB::raw('DATE(created_at) as sale_date'),
+                DB::raw('DATE(COALESCE(inventory_confirmed_at, created_at)) as sale_date'),
                 DB::raw('COUNT(*) as orders_count'),
                 DB::raw('SUM(subtotal) as sales')
             )
-            ->groupBy(DB::raw('DATE(created_at)'))
+            ->groupBy(DB::raw('DATE(COALESCE(inventory_confirmed_at, created_at))'))
             ->orderByDesc(DB::raw('SUM(subtotal)'))
             ->get()
             ->map(fn($row) => [
@@ -317,13 +334,13 @@ class MonthlyReportService
     {
         $salesByDay = DB::table('orders')
             ->where('status', 'paid')
-            ->whereBetween('created_at', [$from, $to])
+            ->whereBetween(DB::raw('COALESCE(inventory_confirmed_at, created_at)'), [$from, $to])
             ->select(
-                DB::raw('DATE(created_at) as sale_date'),
+                DB::raw('DATE(COALESCE(inventory_confirmed_at, created_at)) as sale_date'),
                 DB::raw('COUNT(*) as orders_count'),
                 DB::raw('SUM(subtotal) as sales')
             )
-            ->groupBy(DB::raw('DATE(created_at)'))
+            ->groupBy(DB::raw('DATE(COALESCE(inventory_confirmed_at, created_at))'))
             ->get()
             ->groupBy(fn($row) => (int) Carbon::parse($row->sale_date)->dayOfWeekIso);
 
@@ -344,12 +361,12 @@ class MonthlyReportService
     private function hourlyRanking(Carbon $from, Carbon $to): array
     {
         $hourExpression = DB::getDriverName() === 'sqlite'
-            ? "CAST(strftime('%H', created_at) AS INTEGER)"
-            : 'EXTRACT(HOUR FROM created_at)';
+            ? "CAST(strftime('%H', COALESCE(inventory_confirmed_at, created_at)) AS INTEGER)"
+            : 'EXTRACT(HOUR FROM COALESCE(inventory_confirmed_at, created_at))';
 
         return DB::table('orders')
             ->where('status', 'paid')
-            ->whereBetween('created_at', [$from, $to])
+            ->whereBetween(DB::raw('COALESCE(inventory_confirmed_at, created_at)'), [$from, $to])
             ->select(
                 DB::raw("{$hourExpression} as sale_hour"),
                 DB::raw('COUNT(*) as orders_count'),

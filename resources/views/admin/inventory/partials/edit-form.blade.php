@@ -70,7 +70,7 @@
         </div>
         <div class="form-group">
             <label class="form-label">Stock sistema</label>
-            <input type="number" step="0.0001" name="current_stock" class="form-input" value="{{ $supply->current_stock }}">
+            <input type="number" step="0.0001" readonly class="form-input" value="{{ $supply->current_stock }}">
         </div>
         <div class="form-group">
             <label class="form-label">Stock mínimo</label>
@@ -88,4 +88,13 @@
         </label>
         <button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button>
     </div>
+</form>
+
+<form method="POST" action="{{ route('admin.inventory.adjust', $supply) }}" class="inv-edit-form" style="margin-top:1rem;">
+    @csrf
+    <input type="hidden" name="expected_stock" value="{{ $supply->current_stock }}">
+    <label class="form-label">Ajuste de existencias disponibles</label>
+    <input type="number" step="0.0001" name="quantity" class="form-input" required placeholder="Cantidad a sumar o restar">
+    <input type="text" name="reason" class="form-input" required minlength="5" maxlength="500" placeholder="Motivo y documento de referencia">
+    <button class="btn btn-ghost btn-sm" type="submit">Registrar ajuste</button>
 </form>

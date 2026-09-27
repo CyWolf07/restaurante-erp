@@ -51,6 +51,7 @@
     </div>
     <div class="cashier-actions">
         <a href="{{ route('admin.network') }}" class="btn btn-ghost">📡 Tablets LAN</a>
+        <a href="{{ route('cashier.delivery.create') }}" class="btn btn-primary">🛵 Nuevo domicilio</a>
         <button type="button" class="btn btn-success" id="open-cash-closure" @disabled($cashierClosureExists)>
             Cierre de caja
         </button>
@@ -79,7 +80,7 @@
     <div class="table-map" data-zone="{{ $zone }}">
         @foreach($zoneTables as $t)
         <a href="{{ route('cashier.table-detail', $t['number']) }}" class="table-cell {{ $t['color'] }}" data-table="{{ $t['number'] }}">
-            <span class="table-number">{{ $t['number'] }}</span>
+            <span class="table-number">{{ $t['short_label'] ?? $t['number'] }}</span>
             @if(!empty($t['name']) && $t['name'] !== 'Mesa '.$t['number'])
             <span class="table-name">{{ $t['name'] }}</span>
             @endif
@@ -160,6 +161,8 @@ async function refreshTables() {
             const el = document.querySelector(`[data-table="${t.number}"]`);
             if (!el) return;
             el.className = `table-cell ${t.color}`;
+            const n = el.querySelector('.table-number');
+            if (n && t.short_label) n.textContent = t.short_label;
             el.querySelector('.table-status').textContent = t.status;
             let amt = el.querySelector('.table-amount');
             if (t.total > 0) {

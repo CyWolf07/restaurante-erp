@@ -15,6 +15,7 @@ class OrderDetail extends Model
         'product_id',
         'quantity',
         'unit_price',
+        'discount',
         'subtotal',
         'comments',
     ];
@@ -23,6 +24,7 @@ class OrderDetail extends Model
     {
         return [
             'unit_price' => 'decimal:2',
+            'discount'   => 'decimal:2',
             'subtotal'   => 'decimal:2',
         ];
     }

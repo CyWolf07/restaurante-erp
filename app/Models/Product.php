@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 
 class Product extends Model
 {
@@ -20,13 +21,15 @@ class Product extends Model
         'preparation_time',
         'active',
         'sort_order',
+        'uses_product_modifiers',
     ];
 
     protected function casts(): array
     {
         return [
-            'price'  => 'decimal:2',
-            'active' => 'boolean',
+            'price'                  => 'decimal:2',
+            'active'                 => 'boolean',
+            'uses_product_modifiers' => 'boolean',
         ];
     }
 
@@ -41,9 +44,6 @@ class Product extends Model
         return $this->hasMany(Recipe::class);
     }
 
-    /**
-     * Relación BelongsToMany con insumos a través de recipes (Ficha Técnica)
-     */
     public function supplies()
     {
         return $this->belongsToMany(Supply::class, 'recipes')
@@ -54,6 +54,14 @@ class Product extends Model
     public function orderDetails()
     {
         return $this->hasMany(OrderDetail::class);
+    }
+
+    public function modifiers()
+    {
+        return $this->belongsToMany(Modifier::class, 'product_modifiers')
+            ->withPivot('enabled', 'sort_order')
+            ->withTimestamps()
+            ->orderByPivot('sort_order');
     }
 
     public function scopeActive($query)
@@ -67,5 +75,31 @@ class Product extends Model
             return asset('storage/' . $this->image_path);
         }
         return asset('images/no-image.png');
+    }
+
+    /**
+     * Retorna las opciones activas para este plato:
+     * - Si uses_product_modifiers=true → usa sus propias opciones (override)
+     * - Si no → hereda de su categoría
+     * Resultado agrupado por 'group' para renderizar en la UI.
+     */
+    public function getEffectiveOptions(): Collection
+    {
+        if ($this->uses_product_modifiers) {
+            return $this->modifiers()
+                ->where('modifiers.active', true)
+                ->where('modifiers.type', 'option')
+                ->wherePivot('enabled', true)
+                ->get()
+                ->groupBy('group');
+        }
+
+        // Heredar de categoría
+        $this->loadMissing('category');
+        if (!$this->category) {
+            return collect();
+        }
+
+        return $this->category->activeOptions();
     }
 }

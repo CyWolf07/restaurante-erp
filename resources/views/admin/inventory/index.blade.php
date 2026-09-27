@@ -75,12 +75,12 @@
                 <th class="inv-num" title="Suma V total compras">V/Entrada</th>
                 <th class="inv-num" title="Suma ventas (consumo)">Salida</th>
                 <th class="inv-num" title="(V/Entrada÷Entrada)×Salida">V/Salida</th>
-                <th class="inv-num" title="Entrada − Salida">Stock</th>
-                <th class="inv-num" title="V/Entrada − V/Salida">V/Stock</th>
+                <th class="inv-num" title="Saldo operativo después de las reservas">Disponible</th>
+                <th class="inv-num" title="Físico por costo actual orientativo">V/Stock</th>
                 <th class="inv-num" title="P.V.P">Precio</th>
                 <th class="inv-num" title="V/Stock ÷ Stock">V.C.U.</th>
                 <th class="inv-num" title="Conteo físico manual">Inventario</th>
-                <th class="inv-num" title="Stock − Inventario">Diferencia</th>
+                <th class="inv-num" title="Físico teórico menos último conteo manual">Diferencia</th>
                 <th></th>
             </tr>
         </thead>
@@ -95,10 +95,14 @@
                 <td><strong>{{ $s->code }}</strong></td>
                 <td style="font-weight:600;">{{ $s->name }}</td>
                 <td class="inv-num">{{ number_format($m['entrada'] ?? 0, 3, ',', '.') }}</td>
-                <td class="inv-num">{{ cop($m['v_entrada'] ?? 0) }}</td>
+                <td class="inv-num">{{ ($m['purchase_value_incomplete'] ?? false) ? 'Costo histórico incompleto' : cop($m['v_entrada'] ?? 0) }}</td>
                 <td class="inv-num">{{ number_format($m['salida'] ?? 0, 3, ',', '.') }}</td>
-                <td class="inv-num">{{ cop($m['v_salida'] ?? 0) }}</td>
-                <td class="inv-num">{{ number_format($m['stock'] ?? 0, 3, ',', '.') }}</td>
+                <td class="inv-num">{{ ($m['purchase_value_incomplete'] ?? false) ? 'Sin valoración completa' : cop($m['v_salida'] ?? 0) }}</td>
+                <td class="inv-num">
+                    {{ number_format($m['stock'] ?? 0, 3, ',', '.') }}
+                    <small style="display:block">Reservado: {{ number_format($m['reserved'] ?? 0, 3, ',', '.') }}</small>
+                    <small style="display:block">Físico: {{ number_format($m['physical'] ?? 0, 3, ',', '.') }}</small>
+                </td>
                 <td class="inv-num">{{ cop($m['v_stock'] ?? 0) }}</td>
                 <td class="inv-num">{{ cop($m['precio'] ?? 0) }}</td>
                 <td class="inv-num">{{ cop($m['vcu'] ?? 0) }}</td>
@@ -130,8 +134,8 @@
     </table>
     </div>
     <p style="font-size:0.7rem;color:var(--text-muted);margin-top:0.75rem;">
-        Entrada y V/Entrada desde <strong>Compras (ingresos)</strong>. Salida desde ventas cobradas (consumo en recetas).
-        Inventario físico se edita en ✏️. Stock operativo del sistema: {{-- opcional --}} ver campo «Stock actual» al editar.
+        Entrada y V/Entrada incluyen documentos de compra y compras rápidas históricas sin duplicarlas. Cuando falta el costo histórico se indica como incompleto. Salida desde ventas cobradas (consumo en recetas).
+        Disponible incluye las reservas. Físico suma disponible y reservas vigentes. V/Stock es una valoración al costo actual; el último conteo manual puede corresponder a otro corte. Los ajustes requieren motivo.
     </p>
     <section style="margin-top:1rem;">{{ $supplies->links() }}</section>
 </section>
@@ -213,6 +217,7 @@
         <h2 class="card-title" style="margin-bottom:1rem;">Registrar compra / ingreso</h2>
         <form method="POST" action="{{ route('admin.inventory.purchase') }}">
             @csrf
+            <input type="hidden" name="operation_key" value="{{ old('operation_key', (string) Illuminate\Support\Str::uuid()) }}">
             <section class="form-group">
                 <label class="form-label">Código producto *</label>
                 <input type="text" name="code" class="form-input" list="supply-codes" required>

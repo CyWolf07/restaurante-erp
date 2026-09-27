@@ -24,7 +24,33 @@ class User extends Authenticatable
         'password',
         'remember_token',
         'pin_code',
+        'pin_hash',
+        'pin_lookup',
     ];
+
+    public function setPinCodeAttribute(?string $pin): void
+    {
+        $this->attributes['pin_code'] = null;
+        if ($pin === null || $pin === '') {
+            $this->attributes['pin_hash'] = null;
+            $this->attributes['pin_lookup'] = null;
+            return;
+        }
+        if (! preg_match('/^\d{4,6}$/', $pin)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['pin_code' => 'El PIN debe tener entre cuatro y seis dígitos.']);
+        }
+        $lookup = \App\Support\PinCredential::fingerprint($pin);
+        if (static::where('pin_lookup', $lookup)->when($this->exists, fn ($query) => $query->where('id', '<>', $this->id))->exists()) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['pin_code' => 'Ese PIN ya está asignado.']);
+        }
+        $this->attributes['pin_hash'] = \Illuminate\Support\Facades\Hash::make($pin);
+        $this->attributes['pin_lookup'] = $lookup;
+    }
+
+    public function hasPin(): bool
+    {
+        return ! empty($this->attributes['pin_hash']);
+    }
 
     protected function casts(): array
     {
@@ -74,7 +100,8 @@ class User extends Authenticatable
      */
     public static function findByPin(string $pin): ?self
     {
-        return static::where('pin_code', $pin)->where('active', true)->first();
+        $user = static::where('pin_lookup', \App\Support\PinCredential::fingerprint($pin))->where('active', true)->first();
+        return $user && \Illuminate\Support\Facades\Hash::check($pin, $user->pin_hash) ? $user : null;
     }
 
     public function getRoleLabelAttribute(): string

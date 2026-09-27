@@ -40,7 +40,7 @@ class ProgrammerController extends Controller
             return back()->with('success', '✅ Todos los stocks son consistentes. No se requieren ajustes.');
         }
 
-        return back()->with('success', "🔧 Se repararon {$repaired} de {$total} insumos con desfase.");
+        return view('programmer.integrity-results', ['results' => $results]);
     }
 
     public function integrityDryRun(ProgrammerPanelService $service)

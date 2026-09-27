@@ -2,6 +2,7 @@
   "name": "ERP Restaurante",
   "short_name": "Restaurante",
   "description": "Sistema ERP local para restaurante",
+  "author": "Ing. Josue Villacorte - Zenith",
   "start_url": "/login",
   "display": "standalone",
   "background_color": "#0f172a",

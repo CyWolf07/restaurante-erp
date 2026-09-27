@@ -77,6 +77,8 @@ return [
     'restaurant_name'    => env('RESTAURANT_NAME', 'Mi Restaurante'),
     'restaurant_tables'  => (int) env('RESTAURANT_TABLES', 20),
     'restaurant_address' => env('RESTAURANT_ADDRESS', ''),
+    'author_name'        => env('APP_AUTHOR', 'Ing. Josue Villacorte'),
+    'development_company' => env('APP_DEVELOPMENT_COMPANY', 'Zenith'),
     'pgdump_path'        => env('PGDUMP_PATH', 'pg_dump'),
     'server_host'        => env('SERVER_HOST', '0.0.0.0'),
     'server_port'        => (int) env('SERVER_PORT', 8080),

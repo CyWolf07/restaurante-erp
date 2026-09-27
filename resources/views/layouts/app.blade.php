@@ -2,17 +2,16 @@
 <html lang="es" class="dark">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="theme-color" content="#0f172a">
     <link rel="manifest" href="{{ asset('manifest.webmanifest') }}">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="author" content="{{ config('app.author_name') }} - {{ config('app.development_company') }}">
     <title>@yield('title', 'ERP Restaurante') — {{ config('app.restaurant_name') }}</title>
     <meta name="description" content="Sistema ERP de gestión integral para restaurante — {{ config('app.restaurant_name') }}">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="{{ asset('vendor/chartjs/chart.umd.js') }}"></script>
     @livewireStyles
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -30,7 +29,7 @@
             --transition: all 0.2s cubic-bezier(0.4,0,0.2,1);
         }
         body {
-            font-family: 'Inter', -apple-system, sans-serif;
+            font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
             background: var(--bg-primary); color: var(--text-primary);
             line-height: 1.6; min-height: 100vh;
         }
@@ -83,6 +82,7 @@
         }
         .user-name { font-size: 0.8rem; font-weight: 600; }
         .user-role { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .app-credit { margin-top: 0.75rem; font-size: 0.65rem; line-height: 1.35; color: var(--text-muted); }
 
         .main-content { flex: 1; margin-left: 260px; padding: 2rem; min-height: 100vh; }
         .page-header {
@@ -290,6 +290,9 @@
                 @if(in_array($role, ['cook','administrator','programmer']))
                 <div class="nav-section">
                     <div class="nav-section-title">Cocina</div>
+                    <a href="{{ route('production.index') }}" class="nav-link {{ request()->routeIs('production.*') ? 'active' : '' }}">
+                        <span class="icon">🍲</span><span>Producción por lotes</span>
+                    </a>
                     <a href="{{ route('cook.recipes') }}" class="nav-link {{ request()->routeIs('cook.*') ? 'active' : '' }}">
                         <span class="icon">📖</span><span>Fichas Técnicas</span>
                     </a>
@@ -341,11 +344,17 @@
                     <a href="{{ route('admin.staff.index') }}" class="nav-link {{ request()->routeIs('admin.staff*') ? 'active' : '' }}">
                         <span class="icon">👥</span><span>Personal / Roles</span>
                     </a>
+                    <a href="{{ route('admin.audit') }}" class="nav-link {{ request()->routeIs('admin.audit') ? 'active' : '' }}">
+                        <span class="icon">📋</span><span>Historial de cambios</span>
+                    </a>
                     <a href="{{ route('admin.tables') }}" class="nav-link {{ request()->routeIs('admin.tables*') ? 'active' : '' }}">
                         <span class="icon">🪑</span><span>Mesas</span>
                     </a>
                     <a href="{{ route('admin.products') }}" class="nav-link {{ request()->routeIs('admin.products*') ? 'active' : '' }}">
                         <span class="icon">🍽️</span><span>Platos</span>
+                    </a>
+                    <a href="{{ route('admin.modifiers.index') }}" class="nav-link {{ request()->routeIs('admin.modifiers*') ? 'active' : '' }}">
+                        <span class="icon">🧩</span><span>Opciones de Platos</span>
                     </a>
                     <a href="{{ route('admin.printers') }}" class="nav-link {{ request()->routeIs('admin.printers*') ? 'active' : '' }}">
                         <span class="icon">🖨️</span><span>Impresoras</span>
@@ -385,6 +394,10 @@
                         🚪 Cerrar Sesión
                     </button>
                 </form>
+                <div class="app-credit">
+                    Creado por {{ config('app.author_name') }}<br>
+                    {{ config('app.development_company') }}
+                </div>
             </div>
         </aside>
         @endauth
@@ -397,7 +410,16 @@
                 <div class="alert alert-error">❌ {{ session('error') }}</div>
             @endif
             @if(session('warning'))
-                <div class="alert alert-warning">⚠️ {{ session('warning') }}</motion>
+                <div class="alert alert-warning">⚠️ {{ session('warning') }}</div>
+            @endif
+            @if($errors->any())
+                <div class="alert alert-error" role="alert">
+                    <ul style="margin:0;padding-left:1.25rem;">
+                        @foreach($errors->all() as $message)
+                            <li>{{ $message }}</li>
+                        @endforeach
+                    </ul>
+                </div>
             @endif
             @yield('content')
         </main>

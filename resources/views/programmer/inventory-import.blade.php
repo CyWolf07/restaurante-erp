@@ -50,7 +50,7 @@
             <button type="submit" class="btn btn-primary"
                 formaction="{{ route('programmer.inventory-import.store') }}"
                 onclick="return confirm('¿Cargar e importar productos al inventario?')">
-                Importar ahora
+                Revisar antes de importar
             </button>
         </div>
     </form>
@@ -114,7 +114,7 @@
                             <input type="hidden" name="update_existing" value="1">
                             <button type="submit" class="btn btn-primary btn-sm"
                                 onclick="return confirm('¿Importar «{{ $u->original_name }}» al inventario?')">
-                                {{ $u->isImported() ? '↻ Reimportar' : '▶ Importar' }}
+                                {{ $u->isImported() ? 'Ver lote' : 'Revisar importación' }}
                             </button>
                         </form>
                         <form method="POST" action="{{ route('programmer.inventory-import.destroy', $u) }}"

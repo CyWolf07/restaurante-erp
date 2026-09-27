@@ -12,9 +12,11 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\RestaurantTable;
 use App\Services\InventoryEngine;
+use App\Services\PosOperationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class WaiterController extends Controller
 {
@@ -22,7 +24,7 @@ class WaiterController extends Controller
     {
         $orders = Order::where('waiter_id', Auth::id())
             ->whereIn('status', ['pending', 'in_kitchen', 'ready'])
-            ->with(['details.product', 'kitchenSentBy', 'waiter'])
+            ->with(['details.product', 'kitchenSentBy', 'waiter', 'restaurantTable'])
             ->latest()
             ->get();
 
@@ -32,29 +34,59 @@ class WaiterController extends Controller
     public function createOrder()
     {
         $categories = ProductCategory::orderBy('sort_order')
-            ->with(['products' => fn($q) => $q->active()->orderBy('sort_order')])
+            ->with([
+                'products' => fn ($q) => $q->active()->orderBy('sort_order'),
+                'modifiers' => fn ($q) => $q->where('modifiers.active', true)->where('modifiers.type', 'option')->wherePivot('enabled', true),
+            ])
             ->get();
         $modifiers = Modifier::active()->get();
-        $tables = RestaurantTable::active()->ordered()->get();
+        $isDeliveryScreen = request()->routeIs('cashier.delivery.*');
+        if ($isDeliveryScreen) {
+            $this->ensureDeliveryTables();
+        }
+        $tables = $isDeliveryScreen
+            ? RestaurantTable::active()->where('zone', 'Domicilios')->ordered()->get()
+            : RestaurantTable::active()->ordered()->get();
 
-        $storeRoute = request()->routeIs('cashier.delivery.*')
+        $storeRoute = $isDeliveryScreen
             ? route('cashier.delivery.store')
             : route('waiter.store-order');
-        $screenTitle = request()->routeIs('cashier.delivery.*') ? 'Domicilios' : 'Nueva Orden';
-        $screenSubtitle = request()->routeIs('cashier.delivery.*')
+        $screenTitle = $isDeliveryScreen ? 'Domicilios' : 'Nueva Orden';
+        $screenSubtitle = $isDeliveryScreen
             ? 'Crea ordenes para mesas de domicilio y envialas a cocina'
             : 'Selecciona los platos y envia a cocina';
 
-        return view('waiter.create-order', compact('categories', 'modifiers', 'tables', 'storeRoute', 'screenTitle', 'screenSubtitle'));
+        // Construir mapa de opciones por producto para el JS
+        $productOptions = [];
+        foreach ($categories as $cat) {
+            $catOptions = $cat->modifiers->groupBy('group');
+            foreach ($cat->products as $product) {
+                $options = $product->uses_product_modifiers
+                    ? $product->getEffectiveOptions()
+                    : $catOptions;
+                if ($options->isNotEmpty()) {
+                    $productOptions[$product->id] = $options->map(fn ($group) => $group->map(fn ($m) => [
+                        'id' => $m->id,
+                        'name' => $m->name,
+                    ])->values());
+                }
+            }
+        }
+
+        return view('waiter.create-order', compact('categories', 'modifiers', 'tables', 'storeRoute', 'screenTitle', 'screenSubtitle', 'productOptions'));
     }
 
     public function storeOrder(Request $request, InventoryEngine $engine)
     {
         $request->validate([
-            'restaurant_table_id' => 'required|exists:restaurant_tables,id',
-            'items'        => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity'   => 'required|integer|min:1',
+            'restaurant_table_id' => ['required', Rule::exists('restaurant_tables', 'id')->where('active', true)],
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => ['required', Rule::exists('products', 'id')->where('active', true)],
+            'items.*.quantity' => 'required|integer|min:1|max:999',
+            'items.*.comments' => 'nullable|string|max:1000',
+            'items.*.modifiers' => 'nullable|array|max:100',
+            'items.*.modifiers.*.modifier_id' => ['required', Rule::exists('modifiers', 'id')->where('active', true)],
+            'items.*.modifiers.*.quantity' => 'required|integer|min:1|max:999',
         ]);
 
         $restaurantTable = RestaurantTable::findOrFail($request->restaurant_table_id);
@@ -63,54 +95,53 @@ class WaiterController extends Controller
             return back()->with('error', "La {$restaurantTable->display_name} ya tiene una orden activa.");
         }
 
-        $order = DB::transaction(function () use ($request, $engine, $restaurantTable) {
+        $order = app(PosOperationService::class)->run(function () use ($request, $engine, $restaurantTable) {
+            $restaurantTable = RestaurantTable::active()->lockForUpdate()->findOrFail($restaurantTable->id);
+            if (Order::forTable($restaurantTable->number)->exists()) {
+                throw ValidationException::withMessages(['restaurant_table_id' => 'La mesa ya tiene una orden activa. Actualiza el mapa.']);
+            }
+
             $order = Order::create([
-                'table_number'        => $restaurantTable->number,
+                'table_number' => $restaurantTable->number,
                 'restaurant_table_id' => $restaurantTable->id,
-                'waiter_id'           => Auth::id(),
-                'status'              => 'pending',
+                'waiter_id' => Auth::id(),
+                'status' => 'pending',
             ]);
 
             // Crear detalles de la orden
             foreach ($request->items as $item) {
-                $product = Product::findOrFail($item['product_id']);
+                $product = Product::active()->findOrFail($item['product_id']);
                 $detail = OrderDetail::create([
-                    'order_id'   => $order->id,
+                    'order_id' => $order->id,
                     'product_id' => $product->id,
-                    'quantity'   => $item['quantity'],
+                    'quantity' => $item['quantity'],
                     'unit_price' => $product->price,
-                    'subtotal'   => $product->price * $item['quantity'],
-                    'comments'   => $item['comments'] ?? null,
+                    'discount' => 0,
+                    'subtotal' => \App\Support\Money::lineTotal($product->price, (int) $item['quantity']),
+                    'comments' => $item['comments'] ?? null,
                 ]);
 
                 // Agregar modificadores si existen
-                if (!empty($item['modifiers'])) {
+                if (! empty($item['modifiers'])) {
                     foreach ($item['modifiers'] as $mod) {
-                        $modifier = Modifier::findOrFail($mod['modifier_id']);
+                        $modifier = Modifier::active()->findOrFail($mod['modifier_id']);
                         $qty = $mod['quantity'] ?? 1;
                         OrderDetailModifier::create([
                             'order_detail_id' => $detail->id,
-                            'modifier_id'     => $modifier->id,
-                            'quantity'         => $qty,
-                            'unit_price'       => $modifier->price,
-                            'subtotal'         => $modifier->price * $qty,
+                            'modifier_id' => $modifier->id,
+                            'quantity' => $qty,
+                            'unit_price' => $modifier->price,
+                            'subtotal' => \App\Support\Money::lineTotal($modifier->price, (int) $qty),
                         ]);
                     }
                 }
             }
 
-            // Recalcular totales
-            $order->load('details.modifiers');
-            $subtotal = $order->details->sum('subtotal') + $order->details->flatMap->modifiers->sum('subtotal');
-            $taxRate = (float) config('app.tax_rate', 0.16);
-            $order->update([
-                'subtotal' => $subtotal,
-                'tax'      => round($subtotal * $taxRate, 2),
-                'total'    => round($subtotal * (1 + $taxRate), 2),
-            ]);
+            $order->recalculateTotals();
 
             $order->load('details.product', 'details.modifiers');
             $engine->reserveForOrder($order);
+            app(PosOperationService::class)->record($order, 'created', ['table_number' => $order->table_number]);
 
             return $order->fresh();
         });
@@ -123,17 +154,21 @@ class WaiterController extends Controller
             ->with('success', "Orden Mesa #{$order->table_number} creada. Inventario reservado y pre-ticket impreso.");
     }
 
-    public function sendToKitchen(Order $order, InventoryEngine $engine)
+    public function sendToKitchen(Order $order)
     {
-        if (!$order->isPending()) {
-            return back()->with('error', 'Esta orden ya no está pendiente.');
-        }
+        abort_unless($order->waiter_id === Auth::id() || Auth::user()->isProgrammer() || Auth::user()->isAdministrator(), 403);
 
-        $order->update([
-            'status'          => 'in_kitchen',
-            'kitchen_sent_by' => Auth::id(),
-            'kitchen_sent_at' => now(),
-        ]);
+        app(PosOperationService::class)->run(function () use ($order) {
+            $order = app(PosOperationService::class)->editableOrder($order->id);
+            if (! $order->isPending()) {
+                throw ValidationException::withMessages(['order' => 'Esta orden ya no está pendiente.']);
+            }
+            $order->update([
+                'status' => 'in_kitchen',
+                'kitchen_sent_by' => Auth::id(),
+                'kitchen_sent_at' => now(),
+            ]);
+        });
         PrintKitchenTicketJob::dispatchSync($order->fresh(['waiter', 'kitchenSentBy']));
 
         return back()->with('success', "Orden Mesa #{$order->table_number} enviada a cocina e impresa.");
@@ -141,16 +176,34 @@ class WaiterController extends Controller
 
     public function printPreticket(Order $order)
     {
-        if ($order->waiter_id !== Auth::id() && !Auth::user()->isProgrammer() && !Auth::user()->isAdministrator()) {
+        if ($order->waiter_id !== Auth::id() && ! Auth::user()->isProgrammer() && ! Auth::user()->isAdministrator()) {
             abort(403);
         }
 
-        if (!in_array($order->status, ['pending', 'in_kitchen', 'ready'], true)) {
+        if (! in_array($order->status, ['pending', 'in_kitchen', 'ready'], true)) {
             return back()->with('error', 'No se puede imprimir pre-ticket de una orden cerrada.');
         }
 
         PrintPreticketJob::dispatchSync($order->fresh(['details.product', 'details.modifiers.modifier', 'waiter', 'restaurantTable']));
 
         return back()->with('success', "Pre-ticket Mesa #{$order->table_number} enviado a impresora.");
+    }
+
+    private function ensureDeliveryTables(): void
+    {
+        foreach (range(1, 5) as $n) {
+            RestaurantTable::firstOrCreate(
+                ['number' => 900 + $n],
+                [
+                    'name' => "Domicilio {$n}",
+                    'zone' => 'Domicilios',
+                    'capacity' => 1,
+                    'grid_row' => 0,
+                    'grid_col' => $n,
+                    'active' => true,
+                    'sort_order' => 900 + $n,
+                ]
+            );
+        }
     }
 }

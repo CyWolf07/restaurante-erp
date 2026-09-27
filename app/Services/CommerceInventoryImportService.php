@@ -40,7 +40,7 @@ class CommerceInventoryImportService
         'costo_unitario'     => 'cost_per_unit',
     ];
 
-    public function import(UploadedFile $file, bool $updateExisting = true): array
+    public function import(UploadedFile $file, bool $updateExisting = true, bool $dryRun = false): array
     {
         $result = [
             'created'  => 0,
@@ -81,6 +81,8 @@ class CommerceInventoryImportService
             return $result;
         }
 
+        $pending = [];
+        $seen = [];
         $rowNum = 1;
         while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
             $rowNum++;
@@ -96,25 +98,51 @@ class CommerceInventoryImportService
                 continue;
             }
 
-            $existing = Supply::where('code', $data['code'])->first();
-
-            if ($existing) {
-                if (!$updateExisting) {
-                    $result['skipped']++;
-                    $result['errors'][] = "Fila {$rowNum}: código {$data['code']} ya existe (omitido).";
-                    continue;
-                }
-                $existing->update($data);
-                $result['updated']++;
-            } else {
-                Supply::create($data);
-                $result['created']++;
+            if (isset($seen[$data['code']])) {
+                $result['errors'][] = "Fila {$rowNum}: código duplicado {$data['code']} en el archivo.";
+                continue;
             }
+            $seen[$data['code']] = true;
+            $pending[] = $data;
         }
 
         fclose($handle);
 
-        return $result;
+        if ($result['errors'] !== []) {
+            $result['skipped'] = $result['total_rows'];
+            return $result;
+        }
+
+        $operation = function () use ($pending, $result, $updateExisting, $dryRun, $map) {
+            $catalog = app(InventoryCatalogService::class);
+            foreach ($pending as $data) {
+                $existing = Supply::where('code', $data['code'])->first();
+                if ($existing) {
+                    if (! $updateExisting) {
+                        $result['skipped']++;
+                        continue;
+                    }
+                    // CSV catalog updates never replace balances, units, safety stock or active state.
+                    unset($data['current_stock'], $data['unit_type'], $data['min_stock'], $data['active']);
+                    foreach (['name', 'point', 'location', 'department_number', 'pvp', 'cost_per_unit'] as $field) {
+                        if (! isset($map[$field])) { unset($data[$field]); }
+                    }
+                    if (! $dryRun) {
+                        $catalog->update($existing, $data);
+                    }
+                    $result['updated']++;
+                } else {
+                    if (! $dryRun) {
+                        $catalog->create($data, (string) \Illuminate\Support\Facades\Auth::id());
+                    }
+                    $result['created']++;
+                }
+            }
+            $result['preview'] = $dryRun;
+            return $result;
+        };
+
+        return $dryRun ? $operation() : app(PosOperationService::class)->run($operation, false);
     }
 
     public function templateCsv(): string
@@ -229,8 +257,14 @@ class CommerceInventoryImportService
         }
 
         $name = $get('name') ?: $code;
-        $stock = $this->parseDecimal($get('current_stock')) ?? 0;
-        $cost = $this->parseMoney($get('cost_per_unit')) ?? $pvp;
+        $stock = $this->parseDecimal($get('current_stock'));
+        $cost = $this->parseMoney($get('cost_per_unit'));
+        $unit = $this->normalizeUnit($get('unit_type'));
+        if ($stock === null || $cost === null || $stock < 0 || $cost < 0 || $pvp < 0 || $unit === null || mb_strlen($code) > 50
+            || $stock > 99999999.9999 || $cost > 99999999.9999 || $pvp > 9999999999.99) {
+            $errors[] = "Fila {$rowNum} ({$code}): cantidad, costo, unidad o código inválido. No se aplicó el archivo.";
+            return null;
+        }
 
         return [
             'code'              => $code,
@@ -243,7 +277,7 @@ class CommerceInventoryImportService
             'current_stock'     => max(0, $stock),
             'min_stock'         => 0,
             'cost_per_unit'     => $cost,
-            'unit_type'         => $this->normalizeUnit($get('unit_type')),
+            'unit_type'         => $unit,
             'active'            => true,
         ];
     }
@@ -317,13 +351,13 @@ class CommerceInventoryImportService
         return null;
     }
 
-    private function normalizeUnit(string $value): string
+    private function normalizeUnit(string $value): ?string
     {
-        $v = Str::slug(Str::ascii($value), '_');
-        return match (true) {
-            str_contains($v, 'gram'), str_contains($v, 'gr'), $v === 'g' => 'gram',
-            str_contains($v, 'ml'), str_contains($v, 'lit'), str_contains($v, 'mill') => 'milliliter',
-            default => 'unit',
+        return match (Str::slug(Str::ascii($value), '_')) {
+            'gram', 'gramo', 'gramos', 'g', 'gr' => 'gram',
+            'milliliter', 'mililitro', 'mililitros', 'ml' => 'milliliter',
+            '', 'unit', 'unidad', 'unidades' => 'unit',
+            default => null,
         };
     }
 
@@ -333,15 +367,19 @@ class CommerceInventoryImportService
             return 0.0;
         }
 
-        $clean = preg_replace('/[^\d,.\-]/', '', $value) ?? '';
+        $clean = trim(str_replace(['$', 'COP', ' '], '', $value));
         if (str_contains($clean, ',') && str_contains($clean, '.')) {
-            $clean = str_replace('.', '', $clean);
-            $clean = str_replace(',', '.', $clean);
+            if (strrpos($clean, ',') > strrpos($clean, '.')) {
+                $clean = str_replace('.', '', $clean);
+                $clean = str_replace(',', '.', $clean);
+            } else {
+                $clean = str_replace(',', '', $clean);
+            }
         } elseif (str_contains($clean, ',')) {
             $clean = str_replace(',', '.', $clean);
         }
 
-        return is_numeric($clean) ? (float) $clean : null;
+        return is_numeric($clean) && is_finite((float) $clean) ? (float) $clean : null;
     }
 
     private function parseDecimal(string $value): ?float

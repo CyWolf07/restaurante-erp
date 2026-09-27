@@ -47,22 +47,21 @@
                 <input type="text" name="address" class="form-input" list="win-printers"
                        :placeholder="conn === 'network' ? '192.168.1.100' : 'EPSON TM-T20'" required>
             </div>
-            <div class="grid grid-2" x-show="conn === 'network'">
-                <div class="form-group">
+            <div class="grid grid-2">
+                <div class="form-group" x-show="conn === 'network'">
                     <label class="form-label">Puerto</label>
                     <input type="number" name="port" class="form-input" value="9100">
                 </div>
+                <div class="form-group" x-show="conn === 'windows'" style="display:none;">
+                    <input type="hidden" name="port" value="9100">
+                </div>
                 <div class="form-group">
                     <label class="form-label">Ancho papel (mm)</label>
-                    <select name="paper_width" class="form-select">
-                        <option value="80">80 mm</option>
+                    <select name="paper_width" class="form-select" required>
+                        <option value="80" selected>80 mm</option>
                         <option value="58">58 mm</option>
                     </select>
                 </div>
-            </div>
-            <div x-show="conn === 'windows'" style="display:none;">
-                <input type="hidden" name="port" value="9100">
-                <select name="paper_width" class="form-select" style="display:none;"><option value="80">80</option></select>
             </div>
             <label style="display:flex;align-items:center;gap:0.5rem;margin:0.75rem 0;font-size:0.85rem;">
                 <input type="checkbox" name="is_default" value="1"> Predeterminada para su uso
@@ -112,6 +111,3 @@
     </table>
 </div>
 @endsection
-@push('scripts')
-<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-@endpush

@@ -25,6 +25,7 @@ class Order extends Model
         'locked_at',
         'inventory_reserved_at',
         'inventory_confirmed_at',
+        'inventory_cost_captured_at',
         'preticket_printed',
     ];
 
@@ -38,6 +39,7 @@ class Order extends Model
             'kitchen_sent_at'        => 'datetime',
             'inventory_reserved_at'  => 'datetime',
             'inventory_confirmed_at' => 'datetime',
+            'inventory_cost_captured_at' => 'datetime',
             'preticket_printed'      => 'boolean',
         ];
     }
@@ -89,6 +91,14 @@ class Order extends Model
         return $query->where('status', 'paid');
     }
 
+    public function scopePaidOn($query, \Illuminate\Support\Carbon $date)
+    {
+        return $query->paid()->whereBetween(
+            \Illuminate\Support\Facades\DB::raw('COALESCE(orders.inventory_confirmed_at, orders.created_at)'),
+            [$date->copy()->startOfDay(), $date->copy()->endOfDay()]
+        );
+    }
+
     // Helpers de estado
     public function isPending(): bool   { return $this->status === 'pending'; }
     public function isInKitchen(): bool { return $this->status === 'in_kitchen'; }
@@ -125,16 +135,25 @@ class Order extends Model
      */
     public function recalculateTotals(): void
     {
-        $this->loadMissing('details.modifiers');
+        $this->load('details.modifiers');
 
-        $subtotal = $this->details->sum('subtotal') + $this->details->flatMap->modifiers->sum('subtotal');
-        $taxRate  = (float) config('app.tax_rate', 0.16);
-        $tax      = round($subtotal * $taxRate, 2);
+        $subtotal = \Brick\Math\BigDecimal::zero();
+        foreach ($this->details as $detail) {
+            $subtotal = $subtotal->plus($detail->subtotal);
+            foreach ($detail->modifiers as $modifier) {
+                $subtotal = $subtotal->plus($modifier->subtotal);
+            }
+        }
+        $tax = $subtotal->multipliedBy((string) config('app.tax_rate', 0.16))
+            ->toScale(2, \Brick\Math\RoundingMode::HALF_UP);
+        if ($subtotal->plus($tax)->isGreaterThan('9999999999.99') || $tax->isNegative()) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['order' => 'El total o el impuesto de la cuenta no es válido. Revisa precios, cantidades y configuración.']);
+        }
 
         $this->update([
-            'subtotal' => $subtotal,
-            'tax'      => $tax,
-            'total'    => $subtotal + $tax,
+            'subtotal' => (string) $subtotal->toScale(2),
+            'tax'      => (string) $tax,
+            'total'    => (string) $subtotal->plus($tax)->toScale(2),
         ]);
     }
 }

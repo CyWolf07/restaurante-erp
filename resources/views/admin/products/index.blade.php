@@ -8,6 +8,14 @@
     </div>
 </div>
 
+<form method="GET" action="{{ route('admin.products') }}" class="card" style="margin-bottom:1rem;">
+    <label for="product-search" class="form-label">Buscar plato</label>
+    <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+        <input id="product-search" name="q" value="{{ request('q') }}" maxlength="100" class="form-input" placeholder="Nombre del plato">
+        <button class="btn btn-primary" type="submit">Buscar</button>
+        <a class="btn btn-ghost" href="{{ route('admin.products') }}">Ver todos</a>
+    </div>
+</form>
 <div class="card" style="margin-bottom:1.5rem;" id="product-form-card">
     <h2 class="card-title" style="margin-bottom:1rem;">Nuevo plato</h2>
     <form method="POST" action="{{ route('admin.products.store') }}" enctype="multipart/form-data" id="product-form">
@@ -79,6 +87,7 @@
                         <form method="POST" action="{{ route('admin.products.update', $product) }}" enctype="multipart/form-data"
                               style="margin-top:0.75rem;padding:1rem;background:var(--bg-input);border-radius:var(--radius-sm);max-width:480px;">
                             @csrf @method('PUT')
+                            <input type="hidden" name="replace_recipes" value="1">
                             <input type="text" name="name" class="form-input" value="{{ $product->name }}" required style="margin-bottom:0.5rem;">
                             <select name="category_id" class="form-select" style="margin-bottom:0.5rem;">
                                 <option value="">Sin categoría</option>
@@ -100,6 +109,7 @@
                             </div>
                             @endforeach
                             <label style="font-size:0.8rem;display:flex;gap:0.5rem;margin:0.5rem 0;">
+                                <input type="hidden" name="active" value="0">
                                 <input type="checkbox" name="active" value="1" {{ $product->active?'checked':'' }}> Activo
                             </label>
                             <button type="submit" class="btn btn-primary btn-sm">Actualizar</button>
@@ -117,6 +127,7 @@
         </tbody>
     </table>
 </div>
+<div style="margin-top:1rem;">{{ $products->links() }}</div>
 @endsection
 @push('scripts')
 <script>
@@ -126,11 +137,13 @@ let recipeIdx = 0;
 function addRecipeRow() {
     const div = document.createElement('div');
     div.style.cssText = 'display:flex;gap:0.5rem;margin-bottom:0.5rem;';
-    let opts = supplies.map(s => `<option value="${s.id}">${s.name} (${s.unit})</option>`).join('');
+
     div.innerHTML = `
-        <select name="recipes[${recipeIdx}][supply_id]" class="form-select" required>${opts}</select>
+        <select name="recipes[${recipeIdx}][supply_id]" class="form-select" required></select>
         <input type="number" step="0.0001" name="recipes[${recipeIdx}][quantity_required]" class="form-input" placeholder="Cant." style="width:120px;" required>
         <button type="button" class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">×</button>`;
+    const select = div.querySelector('select');
+    supplies.forEach(s => select.add(new Option(`${s.name} (${s.unit})`, s.id)));
     document.getElementById('recipe-rows').appendChild(div);
     recipeIdx++;
 }

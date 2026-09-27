@@ -1,67 +1,64 @@
-ERP RESTAURANTE — INSTALACION EN PC (SERVIDOR + TABLETS)
+ERP RESTAURANTE - INSTALACION EN PC (SERVIDOR + TABLETS)
 ========================================================
+Autoria: creado por el Ing. Josue Villacorte.
+Empresa en desarrollo: Zenith.
 
-OPCION A — INSTALADOR .EXE (RECOMENDADO PARA EL CLIENTE)
---------------------------------------------------------
-1. En una PC con el proyecto, genera los ejecutables (una sola vez):
-      cd desktop
-      powershell -ExecutionPolicy Bypass -File .\crear-instalador.ps1
+OPCION A - INSTALADOR COMPLETO (RECOMENDADO)
+--------------------------------------------
+1. Doble clic en: Instalar-RestauranteERP.bat
+   Clic derecho -> Ejecutar como administrador si lo pide.
 
-2. Entrega al cliente estos archivos de la carpeta desktop\:
-      Instalar-RestauranteERP.exe   <- primera instalacion
-      RestauranteERP.exe            <- iniciar el servidor cada dia
+2. El instalador descarga e instala automaticamente:
+   - PHP 8.3 con extensiones PostgreSQL/Laravel
+   - PostgreSQL 16
+   - Composer
+   - Node.js 20 LTS + pnpm
 
-3. El cliente hace doble clic en Instalar-RestauranteERP.exe
-   - Elige carpeta (por defecto C:\RestauranteERP)
-   - Configura PostgreSQL en .env cuando se abra el bloc de notas
-   - Se crean accesos directos en escritorio y menu Inicio
+3. Configura todo:
+   - Crea la base de datos
+   - Ejecuta migraciones
+   - Compila assets del frontend
+   - Crea accesos directos en escritorio y menu Inicio
 
-
-OPCION B — INSTALADOR MSI/SETUP PROFESIONAL (Inno Setup)
-------------------------------------------------------
+OPCION B - INSTALADOR INNO SETUP
+--------------------------------
 1. Descarga Inno Setup: https://jrsoftware.org/isinfo.php
-2. (Opcional) Genera RestauranteERP.exe con crear-instalador.ps1
-3. Abre desktop\setup.iss en Inno Setup -> Compile (F9)
-4. El instalador queda en: desktop\Output\RestauranteERP-Setup.exe
-   - Instala en Archivos de programa
-   - Crea iconos y regla de firewall
-   - Ejecuta migraciones al finalizar
-
-
-OPCION C — SIN COMPILAR (DESARROLLO)
-------------------------------------
-   desktop\Instalar-RestauranteERP.bat   -> instalacion
-   desktop\Iniciar-RestauranteERP.bat    -> arrancar servidor
-
-
-REQUISITOS EN EL PC SERVIDOR
-----------------------------
-   - Windows 10/11
-   - PHP 8.2+ en PATH (Laragon recomendado: https://laragon.org)
-   - Composer (https://getcomposer.org)
-   - PostgreSQL 16+ y base restaurant_erp creada
-   - .env con DB_CONNECTION=pgsql y credenciales correctas
-
+2. Abre desktop\setup.iss en Inno Setup -> Compile (F9)
+3. El instalador queda en: desktop\Output\RestauranteERP-Setup.exe
 
 USO DIARIO
 ----------
-   Doble clic: RestauranteERP.exe (o acceso directo "Restaurante ERP")
-   Abre: http://127.0.0.1:8080/login
-   Tablets misma WiFi: http://IP-DEL-PC:8080
-
+Doble clic en "Restaurante ERP" desde el escritorio o el menu Inicio.
+Abre: http://127.0.0.1:8080/login
+Tablets misma WiFi: http://IP-DEL-PC:8080
 
 PINES DE PRUEBA (tras db:seed)
 ------------------------------
-   Mesero: 3333 | Cajero: 2222 | Admin: 1111 | Programador: 0000
+Programador: 0000
+Admin:       1111
+Cajero:      2222
+Mesero:      3333
+Cocinero:    4444
 
+SOLUCION DE PROBLEMAS
+---------------------
+1. "PHP no esta en el PATH"
+   Ejecuta el instalador completo otra vez.
 
-DEPARTAMENTOS DE INVENTARIO (1-8)
----------------------------------
-   1 MATERIA PRIMA
-   2 PRODUCTOS TERMINADOS
-   3 ASEO
-   4 CONSUMIBLES
-   5 ELEMENTOS COCINA Y SERVICIO
-   6 HERRAMIENTAS
-   7 EQUIPOS
-   8 MUEBLES Y ENCERES
+2. "Migraciones fallaron"
+   Verifica que PostgreSQL este corriendo y revisa las credenciales en .env.
+   Si aparece "Permission denied" en storage/logs o bootstrap/cache,
+   ejecuta "Configurar o actualizar Restaurante ERP" como Administrador.
+   Tambien puedes ejecutar:
+      powershell -ExecutionPolicy Bypass -File desktop\Reparar-Permisos-RestauranteERP.ps1
+   Recomendado: instalar en C:\RestauranteERP, no en C:\Program Files.
+
+3. "Assets no compilados"
+   Ejecuta: pnpm install && pnpm run build
+
+4. "Tablets no se conectan"
+   Verifica que esten en la misma red WiFi y que el firewall permita el puerto 8080.
+
+5. Warnings de PHP sobre openssl/exif duplicados o bcmath faltante
+   Abre php.ini y deja una sola linea extension=openssl y extension=exif.
+   Para bcmath, instala/habilita una version de PHP que incluya php_bcmath.dll.

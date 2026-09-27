@@ -32,8 +32,37 @@ class DatabaseBackupService
             throw new \RuntimeException('No existe el archivo SQLite para respaldar.');
         }
 
-        $path = $directory . '/sqlite_' . now()->format('Ymd_His') . '.sqlite';
-        File::copy($database, $path);
+        $path = $directory . '/sqlite_' . now()->format('Ymd_His') . '_' . bin2hex(random_bytes(6)) . '.sqlite';
+        $temporary = $path . '.partial';
+        $source = null;
+        $target = null;
+        try {
+            $source = new \SQLite3($database, SQLITE3_OPEN_READONLY);
+            $source->busyTimeout(5000);
+            $target = new \SQLite3($temporary);
+            if (! $source->backup($target)) {
+                throw new \RuntimeException('No se pudo completar el respaldo SQLite.');
+            }
+            if ($target->querySingle('PRAGMA integrity_check') !== 'ok') {
+                throw new \RuntimeException('La copia SQLite no supera la comprobación de integridad.');
+            }
+            $foreignKeys = $target->query('PRAGMA foreign_key_check');
+            if ($foreignKeys->fetchArray(SQLITE3_ASSOC) !== false) {
+                throw new \RuntimeException('La copia SQLite contiene referencias inválidas.');
+            }
+            $foreignKeys->finalize();
+            $target->close();
+            $target = null;
+            if (! rename($temporary, $path)) {
+                throw new \RuntimeException('No se pudo guardar el respaldo verificado.');
+            }
+        } finally {
+            $target?->close();
+            $source?->close();
+            if (is_file($temporary)) {
+                unlink($temporary);
+            }
+        }
 
         return $path;
     }

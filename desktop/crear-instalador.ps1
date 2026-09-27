@@ -68,6 +68,9 @@ Write-Host "Listo. Archivos en carpeta desktop:" -ForegroundColor Green
 Write-Host "  Instalar-RestauranteERP.exe  -> primera instalacion en el PC"
 Write-Host "  RestauranteERP.exe           -> iniciar servidor cada dia"
 Write-Host ""
+Write-Host "NOTA: El instalador usa pnpm (seguro) en lugar de npm." -ForegroundColor Cyan
+Write-Host "      Incluye verificacion de antiguedad de paquetes (30 dias min)." -ForegroundColor Cyan
+Write-Host ""
 Write-Host "Para generar un instalador MSI profesional:" -ForegroundColor Cyan
 Write-Host "  1. Instala Inno Setup: https://jrsoftware.org/isinfo.php"
 Write-Host "  2. Abre desktop\setup.iss y compila (Build -> Compile)"

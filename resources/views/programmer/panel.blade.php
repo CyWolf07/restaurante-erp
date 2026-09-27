@@ -61,29 +61,29 @@
 <div class="grid grid-3" style="margin-bottom:1.5rem;">
     <form method="POST" action="{{ route('programmer.purge') }}" class="card">
         @csrf
-        <h3 class="card-title">🧹 Purgar temporales</h3>
+        <h3 class="card-title">🧹 Limpiar cachés</h3>
         <p style="font-size:0.85rem;color:var(--text-muted);margin:0.75rem 0 1rem;">
-            Limpia caché, vistas compiladas, logs y sesiones.
+            Limpia caché y vistas compiladas. Conserva sesiones y registros de diagnóstico.
         </p>
-        <button type="submit" class="btn btn-warning" onclick="return confirm('¿Purgar datos temporales?')">Ejecutar purga</button>
+        <button type="submit" class="btn btn-warning" onclick="return confirm('¿Limpiar las cachés?')">Limpiar cachés</button>
     </form>
 
     <form method="POST" action="{{ route('programmer.kill-processes') }}" class="card">
         @csrf
-        <h3 class="card-title">🛑 Anti-loop / Cola</h3>
+        <h3 class="card-title">🛑 Reiniciar trabajadores</h3>
         <p style="font-size:0.85rem;color:var(--text-muted);margin:0.75rem 0 1rem;">
-            Limpia cola de jobs, reinicia workers y elimina fallidos.
+            Solicita un reinicio ordenado. Conserva impresiones, respaldos pendientes y trabajos fallidos.
         </p>
-        <button type="submit" class="btn btn-danger" onclick="return confirm('¿Limpiar cola y reiniciar workers?')">Limpiar cola</button>
+        <button type="submit" class="btn btn-danger" onclick="return confirm('¿Solicitar el reinicio de los trabajadores?')">Solicitar reinicio</button>
     </form>
 
     <form method="POST" action="{{ route('programmer.repair-integrity') }}" class="card">
         @csrf
-        <h3 class="card-title">🔧 Reparar integridad</h3>
+        <h3 class="card-title">🔍 Revisar integridad</h3>
         <p style="font-size:0.85rem;color:var(--text-muted);margin:0.75rem 0 1rem;">
-            Recalcula stock desde inventory_logs y aplica parches.
+            Compara el saldo con los movimientos y señala diferencias para revisar documentos.
         </p>
-        <button type="submit" class="btn btn-primary" onclick="return confirm('¿Aplicar parches de balanceo automático?')">Reparar ahora</button>
+        <button type="submit" class="btn btn-primary">Revisar diferencias</button>
     </form>
 </div>
 

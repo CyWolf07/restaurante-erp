@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Log;
 class ProgrammerPanelService
 {
     /**
-     * Purga datos temporales: caché, logs de sesión Laravel, archivos temporales.
+     * Limpia cachés sin eliminar sesiones ni registros de diagnóstico.
      */
     public function purgeTemporaryData(): array
     {
@@ -34,39 +34,17 @@ class ProgrammerPanelService
             $results[] = 'Cache de rutas: ' . $e->getMessage();
         }
 
-        // Limpiar logs de Laravel
-        $logPath = storage_path('logs/laravel.log');
-        if (File::exists($logPath)) {
-            $size = File::size($logPath);
-            File::put($logPath, '');
-            $results[] = "Log principal truncado ({$this->formatBytes($size)} liberados)";
-        }
-
-        // Limpiar archivos de sesiones (si usa driver 'file')
-        $sessionPath = storage_path('framework/sessions');
-        if (File::isDirectory($sessionPath)) {
-            $count = count(File::files($sessionPath));
-            File::cleanDirectory($sessionPath);
-            $results[] = "{$count} archivos de sesión eliminados";
-        }
+        $results[] = 'Sesiones y registros de diagnóstico conservados';
 
         return $results;
     }
 
     /**
-     * Limpia la cola de jobs y mata workers atascados.
+     * Solicita un reinicio ordenado conservando todos los trabajos.
      */
     public function killStalledProcesses(): array
     {
         $results = [];
-
-        // Limpiar cola de trabajos pendientes
-        try {
-            Artisan::call('queue:clear');
-            $results[] = 'Cola de trabajos limpiada';
-        } catch (\Throwable $e) {
-            $results[] = 'Error limpiando cola: ' . $e->getMessage();
-        }
 
         // Reiniciar workers
         try {
@@ -76,21 +54,14 @@ class ProgrammerPanelService
             $results[] = 'Error reiniciando workers: ' . $e->getMessage();
         }
 
-        // Limpiar jobs fallidos
-        try {
-            $failedCount = DB::table('failed_jobs')->count();
-            Artisan::call('queue:flush');
-            $results[] = "{$failedCount} jobs fallidos eliminados";
-        } catch (\Throwable $e) {
-            $results[] = 'Error limpiando jobs fallidos: ' . $e->getMessage();
-        }
+        $results[] = 'Trabajos pendientes y fallidos conservados para seguimiento';
 
         return $results;
     }
 
     /**
-     * Recalcula el stock de todos los insumos desde cero sumando inventory_logs.
-     * Si hay desfase, aplica un parche de ajuste automático.
+     * Compara saldos y movimientos sin inventar saldos iniciales históricos.
+     * Se conserva la firma anterior para los clientes de diagnóstico.
      *
      * @return array Resultado de la reparación por insumo
      */
@@ -115,32 +86,11 @@ class ProgrammerPanelService
                 'repaired'         => false,
             ];
 
-            // Si hay desfase significativo, aplicar parche
-            if (abs($diff) > 0.0001 && !$dryRun) {
-                DB::transaction(function () use ($supply, $diff, $calculatedStock, $userId) {
-                    // Corregir el stock actual al valor calculado
-                    $supply->update(['current_stock' => $calculatedStock]);
-
-                    // Registrar el ajuste como 'programmer_adjustment'
-                    // Nota: el ajuste NO cambia el cálculo, solo corrige current_stock
-                    // No agregamos un log extra porque eso cambiaría el cálculo
-                    // Solo si queremos documentar la discrepancia:
-                    if ($diff != 0) {
-                        InventoryLog::create([
-                            'supply_id'   => $supply->id,
-                            'type'        => 'programmer_adjustment',
-                            'quantity'    => $diff,
-                            'stock_after' => $calculatedStock,
-                            'user_id'     => $userId,
-                            'description' => "Parche de integridad: desfase de {$diff} detectado y corregido. " .
-                                             "Stock anterior: {$supply->current_stock}, Calculado: {$calculatedStock}",
-                            'created_at'  => now(),
-                        ]);
-                    }
-                });
-
-                $entry['repaired'] = true;
-                Log::warning("Integridad reparada para {$supply->name}: desfase de {$diff}");
+            // A missing opening balance is not evidence that the operational stock is wrong.
+            // Keep historical records intact; reconciliation requires an explicit reviewed adjustment.
+            if (abs($diff) > 0.0001) {
+                $entry['review_required'] = true;
+                $entry['reason'] = 'Revisar saldo inicial y documentos. No se aplican parches automáticos.';
             }
 
             $results[] = $entry;

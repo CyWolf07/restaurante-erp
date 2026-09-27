@@ -16,5 +16,5 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        $exceptions->dontFlash(['pin_code', 'password', 'password_confirmation', 'current_password']);
     })->create();

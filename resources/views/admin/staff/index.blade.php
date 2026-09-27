@@ -126,13 +126,13 @@
                 <td><strong>{{ $u->name }}</strong></td>
                 <td><span class="badge badge-blue">{{ $u->role_label }}</span></td>
                 <td style="font-size:0.8rem;">
-                    @if($u->pin_code)
-                        PIN: <code>{{ $u->pin_code }}</code><br>
+                    @if($u->hasPin())
+                        PIN configurado<br>
                     @endif
                     @if($u->email)
                         {{ $u->email }}
                     @endif
-                    @if(!$u->pin_code && !$u->email)
+                    @if(!$u->hasPin() && !$u->email)
                         <span style="color:var(--text-muted);">Sin acceso</span>
                     @endif
                 </td>
@@ -168,7 +168,7 @@
                                 </select>
                             </section>
                             @php
-                                $editAuth = $u->pin_code && $u->email ? 'both' : ($u->email ? 'email' : 'pin');
+                                $editAuth = $u->hasPin() && $u->email ? 'both' : ($u->email ? 'email' : 'pin');
                             @endphp
                             <section class="form-group">
                                 <label class="form-label">Tipo acceso</label>
@@ -180,7 +180,7 @@
                             </section>
                             <section class="form-group staff-pin-field">
                                 <label class="form-label">PIN (vacío = no cambiar)</label>
-                                <input type="text" name="pin_code" class="form-input" maxlength="6" pattern="\d{4,6}" placeholder="{{ $u->pin_code ? '••••' : 'Nuevo PIN' }}">
+                                <input type="text" name="pin_code" class="form-input" maxlength="6" pattern="\d{4,6}" placeholder="{{ $u->hasPin() ? '••••' : 'Nuevo PIN' }}">
                             </section>
                             <section class="form-group staff-email-field">
                                 <label class="form-label">Correo</label>

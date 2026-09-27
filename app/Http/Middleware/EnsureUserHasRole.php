@@ -13,6 +13,9 @@ class EnsureUserHasRole
         $user = $request->user();
 
         if (!$user || !$user->active) {
+            \Illuminate\Support\Facades\Auth::logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
             return redirect()->route('login')->with('error', 'Sesión inválida o usuario inactivo.');
         }
 

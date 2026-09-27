@@ -28,6 +28,9 @@
     </style>
 </head>
 <body>
+@if($snapshot['totals']['cost_incomplete'] ?? false)
+<p role="alert" style="padding:12px;border:1px solid #b45309">Costos históricos incompletos: existen consumos antiguos sin costo registrado. Los costos mostrados son parciales y el margen no debe interpretarse como resultado definitivo.</p>
+@endif
     @php
         $totals = $snapshot['totals'] ?? [];
         $products = collect($snapshot['products'] ?? []);

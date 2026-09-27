@@ -21,7 +21,7 @@
     <div class="card">
         <div class="card-header">
             <div>
-                <span style="font-size:1.5rem;font-weight:800;">Mesa #{{ $order->table_number }}</span>
+                <span style="font-size:1.5rem;font-weight:800;">{{ $order->restaurantTable?->display_name ?? ('Mesa #'.$order->table_number) }}</span>
                 <span class="badge badge-{{ $order->status_color }}" style="margin-left:0.5rem;">{{ $order->status_label }}</span>
             </div>
         </div>

@@ -20,86 +20,89 @@ class ReportZService
      */
     public function generateReportZ(User $cashier): DailyReportZ
     {
-        $today = Carbon::today();
+        return app(PosOperationService::class)->run(function () use ($cashier) {
+            $today = Carbon::today();
 
-        // 1. Verificar que no exista ya un cierre para este día
-        if (DailyReportZ::where('fiscal_date', $today->toDateString())->exists()) {
-            throw new \RuntimeException('Ya existe un Informe Z para la fecha de hoy: ' . $today->toDateString());
-        }
+            // 1. Verificar que no exista ya un cierre para este día
+            if (DailyReportZ::whereDate('fiscal_date', $today)->exists()) {
+                throw new \RuntimeException('Ya existe un Informe Z para la fecha de hoy: '.$today->toDateString());
+            }
 
-        // 2. Validación de Bloqueo: no deben existir órdenes activas
-        $activeOrders = Order::today()
-            ->whereIn('status', ['pending', 'in_kitchen', 'ready'])
-            ->count();
+            // 2. Validación de Bloqueo: no deben existir órdenes activas
+            $activeOrders = Order::active()->count();
 
-        if ($activeOrders > 0) {
-            throw new \RuntimeException(
-                "No se puede generar el Informe Z. Existen {$activeOrders} órdenes activas " .
-                "(pendientes, en cocina o listas). Todas deben estar pagadas o canceladas."
-            );
-        }
+            if ($activeOrders > 0) {
+                throw new \RuntimeException(
+                    "No se puede generar el Informe Z. Existen {$activeOrders} órdenes activas ".
+                    '(pendientes, en cocina o listas). Todas deben estar pagadas o canceladas.'
+                );
+            }
 
-        return DB::transaction(function () use ($cashier, $today) {
-            // 3. Cálculos agregados del día
-            $paidOrders = Order::today()->where('status', 'paid');
-            $cancelledOrders = Order::today()->where('status', 'cancelled');
+            return DB::transaction(function () use ($cashier, $today) {
+                // 3. Cálculos agregados del día
+                $paidOrders = Order::paidOn($today);
+                $cancelledOrders = Order::today()->where('status', 'cancelled');
 
-            $totalSales    = (float) $paidOrders->sum('total');
-            $totalTax      = (float) $paidOrders->sum('tax');
-            $totalNet      = (float) $paidOrders->sum('subtotal');
-            $totalCount    = $paidOrders->count();
-            $cancelledCount = $cancelledOrders->count();
-            $cancelledAmount = (float) $cancelledOrders->sum('total');
+                $totalSales = (float) $paidOrders->sum('total');
+                $totalTax = (float) $paidOrders->sum('tax');
+                $totalNet = (float) $paidOrders->sum('subtotal');
+                $totalCount = $paidOrders->count();
+                $cancelledCount = $cancelledOrders->count();
+                $cancelledAmount = (float) $cancelledOrders->sum('total');
 
-            // 4. Generar resumen detallado por categorías (JSONB)
-            $summaryData = $this->buildSummaryData($today);
+                // 4. Generar resumen detallado por categorías (JSONB)
+                $summaryData = $this->buildSummaryData($today);
 
-            // 5. Generar PDF del informe
-            $pdfPath = $this->generatePdf([
-                'fiscal_date'            => $today,
-                'total_sales'            => $totalSales,
-                'total_tax'              => $totalTax,
-                'total_net'              => $totalNet,
-                'total_orders_count'     => $totalCount,
-                'cancelled_orders_count' => $cancelledCount,
-                'total_cancelled_amount' => $cancelledAmount,
-                'cashier'                => $cashier,
-                'summary_data'           => $summaryData,
-                'restaurant_name'        => config('app.restaurant_name', 'Restaurante'),
-            ]);
+                // 5. Generar PDF del informe
+                $pdfPath = $this->generatePdf([
+                    'fiscal_date' => $today,
+                    'total_sales' => $totalSales,
+                    'total_tax' => $totalTax,
+                    'total_net' => $totalNet,
+                    'total_orders_count' => $totalCount,
+                    'cancelled_orders_count' => $cancelledCount,
+                    'total_cancelled_amount' => $cancelledAmount,
+                    'cashier' => $cashier,
+                    'summary_data' => $summaryData,
+                    'restaurant_name' => config('app.restaurant_name', 'Restaurante'),
+                ]);
 
-            // 6. Crear registro inmutable en la BD
-            $report = DailyReportZ::create([
-                'fiscal_date'            => $today->toDateString(),
-                'total_sales'            => $totalSales,
-                'total_tax'              => $totalTax,
-                'total_net'              => $totalNet,
-                'total_orders_count'     => $totalCount,
-                'cancelled_orders_count' => $cancelledCount,
-                'total_cancelled_amount' => $cancelledAmount,
-                'cashier_id'             => $cashier->id,
-                'pdf_local_path'         => $pdfPath,
-                'summary_data'           => $summaryData,
-            ]);
+                // 6. Crear registro inmutable en la BD
+                $report = DailyReportZ::create([
+                    'fiscal_date' => $today->toDateString(),
+                    'total_sales' => $totalSales,
+                    'total_tax' => $totalTax,
+                    'total_net' => $totalNet,
+                    'total_orders_count' => $totalCount,
+                    'cancelled_orders_count' => $cancelledCount,
+                    'total_cancelled_amount' => $cancelledAmount,
+                    'cashier_id' => $cashier->id,
+                    'pdf_local_path' => $pdfPath,
+                    'summary_data' => $summaryData,
+                ]);
 
-            // 7. Bloquear todas las órdenes del día (inmutabilidad)
-            Order::today()
-                ->whereIn('status', ['paid', 'cancelled'])
-                ->whereNull('locked_at')
-                ->update(['locked_at' => now()]);
+                // 7. Bloquear todas las órdenes del día (inmutabilidad)
+                Order::where(function ($query) use ($today) {
+                    $query->paidOn($today)->orWhere(function ($cancelled) {
+                        $cancelled->today()->where('status', 'cancelled');
+                    });
+                })
+                    ->whereNull('locked_at')
+                    ->update(['locked_at' => now()]);
 
-            // 8. Despachar backup asíncrono de la BD
-            $this->dispatchBackup($report);
+                // 8. Despachar backup asíncrono de la BD
+                DB::afterCommit(fn () => $this->dispatchBackup($report));
 
-            Log::info("Informe Z generado exitosamente", [
-                'report_id'   => $report->id,
-                'fiscal_date' => $today->toDateString(),
-                'total_sales' => $totalSales,
-                'cashier'     => $cashier->name,
-            ]);
+                Log::info('Informe Z generado exitosamente', [
+                    'report_id' => $report->id,
+                    'fiscal_date' => $today->toDateString(),
+                    'total_sales' => $totalSales,
+                    'cashier' => $cashier->name,
+                ]);
 
-            return $report;
-        });
+                return $report;
+            });
+        }, requireOpen: false);
     }
 
     /**
@@ -112,7 +115,7 @@ class ReportZService
             ->join('products', 'products.id', '=', 'order_details.product_id')
             ->leftJoin('product_categories', 'product_categories.id', '=', 'products.category_id')
             ->where('orders.status', 'paid')
-            ->whereDate('orders.created_at', $date)
+            ->whereBetween(DB::raw('COALESCE(orders.inventory_confirmed_at, orders.created_at)'), [$date->copy()->startOfDay(), $date->copy()->endOfDay()])
             ->select(
                 'product_categories.name as category_name',
                 'products.name as product_name',
@@ -124,11 +127,11 @@ class ReportZService
             ->get();
 
         return [
-            'by_product' => $orderDetails->map(fn($row) => [
+            'by_product' => $orderDetails->map(fn ($row) => [
                 'category' => $row->category_name ?? 'Sin Categoría',
-                'product'  => $row->product_name,
-                'quantity'  => (int) $row->total_quantity,
-                'amount'    => (float) $row->total_amount,
+                'product' => $row->product_name,
+                'quantity' => (int) $row->total_quantity,
+                'amount' => (float) $row->total_amount,
             ])->toArray(),
             'generated_at' => now()->toIso8601String(),
         ];
@@ -139,20 +142,20 @@ class ReportZService
      */
     private function generatePdf(array $data): string
     {
-        $year  = $data['fiscal_date']->format('Y');
+        $year = $data['fiscal_date']->format('Y');
         $month = $data['fiscal_date']->format('m');
         $filename = "Z_{$data['fiscal_date']->format('Ymd')}_{$data['fiscal_date']->format('His')}.pdf";
 
         $directory = storage_path("app/secure_reports/{$year}/{$month}");
-        if (!is_dir($directory)) {
+        if (! is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
 
         $fullPath = "{$directory}/{$filename}";
 
         $pdf = Pdf::loadView('reports.report-z-pdf', $data)
-                  ->setPaper('letter')
-                  ->setOption('defaultFont', 'sans-serif');
+            ->setPaper('letter')
+            ->setOption('defaultFont', 'sans-serif');
 
         $pdf->save($fullPath);
 
@@ -167,7 +170,7 @@ class ReportZService
         try {
             DatabaseBackupJob::dispatch($report);
         } catch (\Throwable $e) {
-            Log::warning("No se pudo encolar el backup de BD: " . $e->getMessage());
+            Log::warning('No se pudo encolar el backup de BD: '.$e->getMessage());
             // No lanzar excepción — el informe Z ya se creó exitosamente
         }
     }

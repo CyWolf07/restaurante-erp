@@ -4,7 +4,7 @@
 <div class="page-header">
     <div>
         <h1 class="page-title">🔍 Conteo Físico (Ciego)</h1>
-        <p class="page-subtitle">Ingresa el stock real contado — el sistema calculará incongruencias</p>
+        <p class="page-subtitle">Cuenta las existencias físicas, incluidas las reservadas que aún están en bodega. Este registro no ajusta el stock automáticamente.</p>
     </div>
 </div>
 
@@ -13,7 +13,7 @@
     <div class="card" style="margin-bottom:1rem;">
         <div class="form-group">
             <label class="form-label">Notas del conteo (opcional)</label>
-            <textarea name="notes" class="form-textarea" rows="2" placeholder="Turno matutino, auditoría semanal..."></textarea>
+            <textarea name="notes" class="form-textarea" rows="2" placeholder="Turno matutino, auditoría semanal...">{{ old('notes') }}</textarea>
         </div>
     </div>
 
@@ -22,7 +22,6 @@
             <thead>
                 <tr>
                     <th>Insumo</th>
-                    <th>Stock teórico (sistema)</th>
                     <th>Stock físico contado</th>
                 </tr>
             </thead>
@@ -33,12 +32,13 @@
                         <strong>{{ $supply->name }}</strong>
                         <br><small style="color:var(--text-muted);">{{ $supply->unit_label }}</small>
                     </td>
-                    <td>{{ number_format($supply->current_stock, 4) }}</td>
                     <td>
                         <input type="number" step="0.0001" min="0"
                                name="counts[{{ $supply->id }}]"
                                class="form-input"
-                               value="{{ number_format($supply->current_stock, 4, '.', '') }}"
+                               value="{{ old('counts.'.$supply->id) }}"
+                               aria-label="Cantidad contada de {{ $supply->name }} en {{ $supply->unit_label }}"
+                               inputmode="decimal" max="99999999.9999" placeholder="Sin contar"
                                required>
                     </td>
                 </tr>

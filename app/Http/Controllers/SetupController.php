@@ -22,6 +22,9 @@ class SetupController extends Controller
                 'id'     => $table->id,
                 'number' => $table->number,
                 'name'   => $table->display_name,
+                'short_label' => ($table->zone === 'Domicilios' && preg_match('/(\d+)/', (string) $table->name, $m))
+                    ? ('D' . $m[1])
+                    : (string) $table->number,
                 'zone'   => $table->zone,
                 'color'  => $table->status_color,
                 'status' => $order?->status_label ?? 'Libre',
