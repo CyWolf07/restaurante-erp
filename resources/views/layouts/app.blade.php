@@ -31,7 +31,7 @@
         body {
             font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
             background: var(--bg-primary); color: var(--text-primary);
-            line-height: 1.6; min-height: 100vh;
+            line-height: 1.6; min-height: 100vh; overflow-x: hidden;
         }
 
         /* ── Layout ── */
@@ -84,7 +84,7 @@
         .user-role { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
         .app-credit { margin-top: 0.75rem; font-size: 0.65rem; line-height: 1.35; color: var(--text-muted); }
 
-        .main-content { flex: 1; margin-left: 260px; padding: 2rem; min-height: 100vh; }
+        .main-content { flex: 1; margin-left: 260px; padding: 2rem; min-height: 100vh; min-width: 0; max-width: 100%; }
         .page-header {
             display: flex; align-items: center; justify-content: space-between;
             margin-bottom: 2rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border);
@@ -272,11 +272,120 @@
         ::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
     </style>
     @stack('styles')
+    <style>
+        /* Capa responsive global: se carga después de los estilos de cada pantalla. */
+        img, svg, canvas, video { max-width: 100%; }
+        input, select, textarea, button { max-width: 100%; }
+        .card, .stat-card, .grid > *, .page-header > * { min-width: 0; }
+        .card, .alert, .page-title, .page-subtitle, td, th, p, label, strong, span {
+            overflow-wrap: anywhere;
+        }
+        .data-table { display: block; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .data-table thead, .data-table tbody { white-space: normal; }
+        .mobile-topbar, .sidebar-backdrop { display: none; }
+
+        @media (max-width: 1024px) {
+            .main-content { padding: clamp(1rem, 2.5vw, 1.5rem); }
+            .page-title { font-size: clamp(1.35rem, 3vw, 1.75rem); }
+            .stat-value { font-size: clamp(1.45rem, 4vw, 2rem); }
+        }
+
+        @media (max-width: 768px) {
+            body.nav-open { overflow: hidden; }
+            .app-layout { display: block; width: 100%; }
+            .mobile-topbar {
+                position: sticky; top: 0; z-index: 45; display: flex; align-items: center;
+                gap: 0.75rem; min-height: 3.75rem; padding: 0.65rem 1rem;
+                background: rgba(15, 23, 42, 0.96); border-bottom: 1px solid var(--border);
+                backdrop-filter: blur(12px);
+            }
+            .mobile-menu-button {
+                flex: 0 0 2.6rem; width: 2.6rem; height: 2.6rem; border-radius: var(--radius-sm);
+                border: 1px solid var(--border); background: var(--bg-secondary);
+                color: var(--text-primary); font-size: 1.25rem; cursor: pointer;
+            }
+            .mobile-topbar-title { min-width: 0; font-size: 0.95rem; font-weight: 800; }
+            .mobile-topbar-role { display: block; color: var(--text-muted); font-size: 0.68rem; font-weight: 500; }
+            .sidebar {
+                display: flex; width: min(86vw, 300px); max-width: 100%;
+                transform: translateX(-105%); box-shadow: var(--shadow-lg);
+                visibility: hidden; transition: transform 0.22s ease, visibility 0.22s;
+            }
+            .sidebar.is-open { transform: translateX(0); visibility: visible; }
+            .sidebar .sidebar-brand h1, .sidebar .sidebar-brand small,
+            .sidebar .nav-section-title, .sidebar .nav-link span,
+            .sidebar .user-name, .sidebar .user-role { display: initial; }
+            .sidebar .sidebar-brand { padding: 1rem 1.25rem; justify-content: flex-start; }
+            .sidebar .nav-link { justify-content: flex-start; padding: 0.7rem 0.75rem; }
+            .sidebar-backdrop {
+                position: fixed; inset: 0; z-index: 40; background: rgba(2, 6, 23, 0.72);
+                border: 0; width: 100%; height: 100%; cursor: pointer;
+            }
+            .sidebar-backdrop.is-visible { display: block; }
+            .main-content { width: 100%; margin-left: 0; padding: 1rem; overflow: hidden; }
+            .page-header { align-items: flex-start; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem; }
+            .page-header > :last-child:not(:first-child) { width: 100%; }
+            .page-header .btn { justify-content: center; }
+            .card { padding: 1rem; }
+            .card-header { align-items: flex-start; flex-wrap: wrap; gap: 0.65rem; }
+            .modal-overlay, .options-overlay { padding: 0.75rem; }
+            .modal-content, .options-modal { width: 100%; max-width: 100%; max-height: calc(100dvh - 1.5rem); }
+            .modal-header, .modal-body { padding: 1rem; }
+            .btn { white-space: normal; text-align: center; justify-content: center; }
+            .erp-pagination { justify-content: center; }
+            .erp-pagination-info { width: 100%; text-align: center; }
+            .erp-pagination-controls { max-width: 100%; overflow-x: auto; }
+
+            /* Pantallas operativas que antes conservaban columnas de escritorio. */
+            .commander, .detail-layout, .cash-count-layout, .format-grid, .mod-grid {
+                grid-template-columns: minmax(0, 1fr) !important;
+            }
+            .commander { min-height: auto !important; }
+            .cart-area { position: static !important; }
+            .product-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+            .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+            .compare-form, .compare-result { grid-template-columns: minmax(0, 1fr) !important; }
+            .cash-summary { grid-template-columns: minmax(0, 1fr) !important; }
+            .add-product-grid, .edit-detail-grid, .count-row, .expense-row {
+                grid-template-columns: minmax(0, 1fr) !important;
+            }
+            .inv-table-wrap { max-width: 100%; overflow-x: auto; }
+        }
+
+        @media (max-width: 480px) {
+            html { font-size: 15px; }
+            .main-content { padding: 0.75rem; }
+            .mobile-topbar { padding-inline: 0.75rem; }
+            .page-title { font-size: 1.3rem; line-height: 1.25; }
+            .page-subtitle { font-size: 0.8rem; }
+            .card { padding: 0.85rem; border-radius: 10px; }
+            .grid, .grid-2, .grid-3, .grid-4, .kpi-grid { grid-template-columns: minmax(0, 1fr) !important; }
+            .product-grid { gap: 0.55rem !important; }
+            .product-card-name, .product-card-price { overflow-wrap: anywhere; }
+            .cart-item { align-items: flex-start; flex-wrap: wrap; }
+            .cart-item > * { min-width: 0; }
+            .tab-btns { flex-wrap: wrap; }
+            .tab-btn { min-width: 50%; }
+            .pin-display { font-size: 1.5rem; letter-spacing: 0.4rem; }
+            .login-page { min-height: 100dvh; padding: 0.75rem; }
+            .login-brand { margin-bottom: 1.25rem; }
+            .data-table thead th, .data-table tbody td { padding: 0.65rem 0.75rem; }
+        }
+    </style>
 </head>
 <body>
     <div class="app-layout">
         @auth
-        <aside class="sidebar">
+        <header class="mobile-topbar">
+            <button type="button" class="mobile-menu-button" id="mobile-menu-button"
+                    aria-label="Abrir menú principal" aria-controls="app-sidebar" aria-expanded="false">☰</button>
+            <div class="mobile-topbar-title">
+                {{ config('app.restaurant_name') }}
+                <span class="mobile-topbar-role">{{ auth()->user()->role_label }}</span>
+            </div>
+        </header>
+        <button type="button" class="sidebar-backdrop" id="sidebar-backdrop" aria-label="Cerrar menú"></button>
+        <aside class="sidebar" id="app-sidebar">
             <div class="sidebar-brand">
                 <div class="sidebar-brand-icon">🍽️</div>
                 <div>
@@ -426,5 +535,33 @@
     </div>
     @livewireScripts
     @stack('scripts')
+    @auth
+    <script>
+        (() => {
+            const button = document.getElementById('mobile-menu-button');
+            const sidebar = document.getElementById('app-sidebar');
+            const backdrop = document.getElementById('sidebar-backdrop');
+            if (!button || !sidebar || !backdrop) return;
+
+            const setMenu = (open) => {
+                sidebar.classList.toggle('is-open', open);
+                backdrop.classList.toggle('is-visible', open);
+                document.body.classList.toggle('nav-open', open);
+                button.setAttribute('aria-expanded', String(open));
+                button.setAttribute('aria-label', open ? 'Cerrar menú principal' : 'Abrir menú principal');
+            };
+
+            button.addEventListener('click', () => setMenu(!sidebar.classList.contains('is-open')));
+            backdrop.addEventListener('click', () => setMenu(false));
+            sidebar.querySelectorAll('a').forEach(link => link.addEventListener('click', () => setMenu(false)));
+            document.addEventListener('keydown', event => {
+                if (event.key === 'Escape') setMenu(false);
+            });
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 768) setMenu(false);
+            });
+        })();
+    </script>
+    @endauth
 </body>
 </html>
