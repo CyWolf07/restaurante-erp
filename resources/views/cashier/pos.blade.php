@@ -50,6 +50,9 @@
         </p>
     </div>
     <div class="cashier-actions">
+        <a id="fiscal-pending-summary" href="{{ route('cashier.fiscal-documents.index') }}" class="btn {{ $fiscalPendingSummary['count'] > 0 ? 'btn-warning' : 'btn-ghost' }}">
+            🧾 Pendientes fiscales: {{ $fiscalPendingSummary['count'] }} · {{ cop($fiscalPendingSummary['total']) }}
+        </a>
         <a href="{{ route('admin.network') }}" class="btn btn-ghost">📡 Tablets LAN</a>
         <a href="{{ route('cashier.delivery.create') }}" class="btn btn-primary">🛵 Nuevo domicilio</a>
         <button type="button" class="btn btn-success" id="open-cash-closure" @disabled($cashierClosureExists)>
@@ -109,7 +112,7 @@
                 <div class="cash-summary">
                     <div class="cash-summary-item">
                         <span>Ventas del dia</span>
-                        <strong>{{ cop($cashierClosureSummary['total_sales']) }}</strong>
+                        <strong id="summary-daily-sales">{{ cop($cashierClosureSummary['total_sales']) }}</strong>
                     </div>
                     <div class="cash-summary-item">
                         <span>Total gastos</span>
@@ -148,14 +151,22 @@
 <script>
 const STATUS_URL = @json(route('api.pos.status'));
 const POLL_MS = 4000;
-const DAILY_SALES_TOTAL = Number(@json($cashierClosureSummary['total_sales']));
+let DAILY_SALES_TOTAL = Number(@json($cashierClosureSummary['total_sales']));
 
 async function refreshTables() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-        const res = await fetch(STATUS_URL, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' } });
-        if (!res.ok) return;
+        const res = await fetch(STATUS_URL, { headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal });
+        if (!res.ok) throw new Error('Respuesta inválida');
         const data = await res.json();
         document.getElementById('last-update').textContent = new Date(data.updated_at).toLocaleTimeString();
+        if (data.summary) {
+            DAILY_SALES_TOTAL = Number(data.summary.total_sales);
+            document.getElementById('summary-daily-sales').textContent = formatCop(DAILY_SALES_TOTAL);
+            recalculateExpenses();
+            document.getElementById('fiscal-pending-summary').textContent = `🧾 Pendientes fiscales: ${data.summary.fiscal_pending_count} · ${formatCop(data.summary.fiscal_pending_total)}`;
+        }
 
         data.tables.forEach(t => {
             const el = document.querySelector(`[data-table="${t.number}"]`);
@@ -170,11 +181,12 @@ async function refreshTables() {
                 amt.textContent = t.total_formatted || new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(t.total);
             } else if (amt) { amt.remove(); }
         });
-    } catch (e) { /* servidor offline */ }
+    } catch (e) {
+        document.getElementById('last-update').textContent = 'Sin conexión o sesión vencida: datos desactualizados';
+    } finally { clearTimeout(timeout); setTimeout(refreshTables, POLL_MS); }
 }
 
-setInterval(refreshTables, POLL_MS);
-refreshTables();
+document.addEventListener('DOMContentLoaded', refreshTables);
 
 const cashModal = document.getElementById('cash-closure-modal');
 const expensesList = document.getElementById('expenses-list');

@@ -67,7 +67,7 @@ function openRecipeModal(productId) {
     if (!product) return;
 
     document.getElementById('modal-title').textContent = '📋 ' + product.name;
-    let html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">';
+    let html = '<div class="grid grid-2" style="gap:2rem;">';
 
     // Columna izquierda — Ingredientes
     html += '<div>';
@@ -76,7 +76,7 @@ function openRecipeModal(productId) {
     if (product.recipes && product.recipes.length > 0) {
         product.recipes.forEach(r => {
             const unitLabel = r.supply ? ({gram:'g',milliliter:'ml',unit:'unidad(es)'}[r.supply.unit_type]||r.supply.unit_type) : '';
-            html += `<tr><td style="font-weight:600;">${r.supply ? r.supply.name : 'N/A'}</td><td>${parseFloat(r.quantity_required).toFixed(1)}</td><td>${unitLabel}</td></tr>`;
+            html += `<tr><td style="font-weight:600;">${erpEscape(r.supply ? r.supply.name : 'N/A')}</td><td>${parseFloat(r.quantity_required).toFixed(1)}</td><td>${erpEscape(unitLabel)}</td></tr>`;
         });
     } else {
         html += '<tr><td colspan="3" style="color:var(--text-muted);text-align:center;">Sin ingredientes registrados</td></tr>';
@@ -93,14 +93,14 @@ function openRecipeModal(productId) {
         const steps = product.recipe_instructions.split('\n').filter(s => s.trim());
         html += '<ol style="padding-left:1.25rem;">';
         steps.forEach((step, i) => {
-            html += `<li style="margin-bottom:0.75rem;padding:0.75rem;background:var(--bg-input);border-radius:var(--radius-sm);font-size:0.85rem;line-height:1.6;">${step.trim()}</li>`;
+            html += `<li style="margin-bottom:0.75rem;padding:0.75rem;background:var(--bg-input);border-radius:var(--radius-sm);font-size:0.85rem;line-height:1.6;">${erpEscape(step.trim())}</li>`;
         });
         html += '</ol>';
     } else {
         html += '<p style="color:var(--text-muted);font-style:italic;">Sin instrucciones de preparación registradas.</p>';
     }
     if (product.description) {
-        html += `<div style="margin-top:1.5rem;padding:1rem;background:var(--bg-input);border-radius:var(--radius-sm);"><strong style="font-size:0.8rem;">Descripción:</strong><p style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.25rem;">${product.description}</p></div>`;
+        html += `<div style="margin-top:1.5rem;padding:1rem;background:var(--bg-input);border-radius:var(--radius-sm);"><strong style="font-size:0.8rem;">Descripción:</strong><p style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.25rem;">${erpEscape(product.description)}</p></div>`;
     }
     html += '</div></div>';
 

@@ -103,11 +103,17 @@
 
     <div class="section-title">Resumen de ventas</div>
     <div class="row"><span class="label">Ventas brutas</span><span class="value">{{ cop($closure->total_sales) }}</span></div>
+    <div class="row"><span class="label">Ventas en efectivo</span><span class="value">{{ isset($closure->cash_count_summary['cash_sales']) ? cop($closure->cash_count_summary['cash_sales']) : 'No registrado (histórico)' }}</span></div>
+    <div class="row"><span class="label">Ventas sin efectivo</span><span class="value">{{ isset($closure->cash_count_summary['non_cash_sales']) ? cop($closure->cash_count_summary['non_cash_sales']) : 'No registrado (histórico)' }}</span></div>
     <div class="row"><span class="label">Subtotal neto</span><span class="value">{{ cop($closure->total_net) }}</span></div>
     <div class="row"><span class="label">Impuestos</span><span class="value">{{ cop($closure->total_tax) }}</span></div>
     <div class="row"><span class="label">Ordenes pagadas</span><span class="value">{{ $closure->total_orders_count }}</span></div>
     <div class="row"><span class="label">Ordenes canceladas</span><span class="value">{{ $closure->cancelled_orders_count }}</span></div>
     <div class="row"><span class="label">Valor cancelado</span><span class="value">{{ cop($closure->total_cancelled_amount) }}</span></div>
+
+    <div class="section-title">Control fiscal pendiente</div>
+    <div class="row"><span class="label">Documentos sin enviar (acumulado)</span><span class="value">{{ $closure->fiscal_pending_count }}</span></div>
+    <div class="row"><span class="label">Valor pendiente al cierre</span><span class="value">{{ cop($closure->fiscal_pending_total) }}</span></div>
 
     <div class="section-title">Gastos del dia</div>
     @if(!empty($closure->expenses))

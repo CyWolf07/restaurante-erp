@@ -16,6 +16,8 @@ class Product extends Model
         'name',
         'description',
         'price',
+        'tax_type',
+        'tax_rate',
         'image_path',
         'recipe_instructions',
         'preparation_time',
@@ -27,8 +29,9 @@ class Product extends Model
     protected function casts(): array
     {
         return [
-            'price'                  => 'decimal:2',
-            'active'                 => 'boolean',
+            'price' => 'decimal:2',
+            'tax_rate' => 'decimal:4',
+            'active' => 'boolean',
             'uses_product_modifiers' => 'boolean',
         ];
     }
@@ -47,8 +50,8 @@ class Product extends Model
     public function supplies()
     {
         return $this->belongsToMany(Supply::class, 'recipes')
-                    ->withPivot('quantity_required')
-                    ->withTimestamps();
+            ->withPivot('quantity_required')
+            ->withTimestamps();
     }
 
     public function orderDetails()
@@ -71,9 +74,10 @@ class Product extends Model
 
     public function getImageUrlAttribute(): string
     {
-        if ($this->image_path && file_exists(storage_path('app/public/' . $this->image_path))) {
-            return asset('storage/' . $this->image_path);
+        if ($this->image_path && file_exists(storage_path('app/public/'.$this->image_path))) {
+            return asset('storage/'.$this->image_path);
         }
+
         return asset('images/no-image.png');
     }
 
@@ -96,7 +100,7 @@ class Product extends Model
 
         // Heredar de categoría
         $this->loadMissing('category');
-        if (!$this->category) {
+        if (! $this->category) {
             return collect();
         }
 

@@ -33,6 +33,8 @@
         <tr><td class="label">Órdenes pagadas</td><td class="value">{{ $total_orders_count ?? 0 }}</td></tr>
         <tr><td class="label">Órdenes canceladas</td><td class="value">{{ $cancelled_orders_count }}</td></tr>
         <tr><td class="label">Monto cancelado</td><td class="value">${{ number_format($total_cancelled_amount, 2) }}</td></tr>
+        <tr><td class="label">Documentos fiscales sin enviar (acumulado al cierre)</td><td class="value">{{ $fiscal_pending_count ?? 0 }}</td></tr>
+        <tr><td class="label">Valor pendiente de transmisión (acumulado)</td><td class="value">${{ number_format($fiscal_pending_total ?? 0, 2) }}</td></tr>
     </table>
 
     @if(!empty($summary_data['by_product']))
@@ -55,7 +57,7 @@
     @endif
 
     <div class="footer">
-        Documento inmutable generado localmente. No válido sin respaldo de BD asociado.
+        Documento interno generado localmente. El valor pendiente de transmisión requiere conciliación y envío por el sistema fiscal autorizado.
     </div>
 </body>
 </html>

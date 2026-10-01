@@ -18,20 +18,34 @@ class OrderDetail extends Model
         'discount',
         'subtotal',
         'comments',
+        'tax_type',
+        'tax_rate',
+        'kitchen_sent_at',
     ];
 
     protected function casts(): array
     {
         return [
             'unit_price' => 'decimal:2',
-            'discount'   => 'decimal:2',
-            'subtotal'   => 'decimal:2',
+            'discount' => 'decimal:2',
+            'subtotal' => 'decimal:2',
+            'tax_rate' => 'decimal:4',
+            'kitchen_sent_at' => 'datetime',
         ];
     }
 
     public function order()
     {
         return $this->belongsTo(Order::class);
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $detail) {
+            $product = Product::find($detail->product_id);
+            $detail->tax_rate ??= $product?->tax_rate ?? config('app.tax_rate', 0);
+            $detail->tax_type ??= $product?->tax_type ?? 'configured';
+        });
     }
 
     public function product()

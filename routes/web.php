@@ -1,40 +1,46 @@
 <?php
 
+use App\Http\Controllers\Admin\AuditController;
 use App\Http\Controllers\Admin\CommerceInventoryController;
-use App\Http\Controllers\Admin\ModifierController;
 use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\ModifierController;
 use App\Http\Controllers\Admin\PrinterController;
 use App\Http\Controllers\Admin\ProductController;
 use App\Http\Controllers\Admin\StaffUserController;
 use App\Http\Controllers\Admin\TableController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CookController;
+use App\Http\Controllers\FiscalDocumentController;
 use App\Http\Controllers\PosController;
-use App\Http\Controllers\ProgrammerController;
+use App\Http\Controllers\ProductionController;
 use App\Http\Controllers\Programmer\InventoryImportController;
 use App\Http\Controllers\Programmer\PrintTemplateController;
+use App\Http\Controllers\ProgrammerController;
 use App\Http\Controllers\SetupController;
 use App\Http\Controllers\WaiterController;
+use App\Http\Middleware\SerializeFiscalWrites;
 use Illuminate\Support\Facades\Route;
 
 // Auth
-Route::get('/', fn() => redirect()->route('login'));
+Route::get('/', fn () => redirect()->route('login'));
 Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
 Route::post('/login', [AuthController::class, 'login'])->name('login.post');
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middleware('auth');
 
 // Cocina (cocineros, solo lectura)
 Route::middleware(['auth', 'role:cook,administrator,programmer'])->prefix('cook')->group(function () {
+    Route::get('/orders', [CookController::class, 'orders'])->name('cook.orders');
+    Route::post('/orders/{order}/ready', [PosController::class, 'markReady'])->name('cook.mark-ready');
     Route::get('/recipes', [CookController::class, 'recipes'])->name('cook.recipes');
     Route::get('/recipes/{product}', [CookController::class, 'recipeDetail'])->name('cook.recipe-detail');
 });
 
 // Mesero (comandero digital)
 Route::middleware(['auth', 'role:cook,administrator,programmer'])->prefix('production')->group(function () {
-    Route::get('/', [\App\Http\Controllers\ProductionController::class, 'index'])->name('production.index');
-    Route::post('/', [\App\Http\Controllers\ProductionController::class, 'store'])->name('production.store');
-    Route::post('/{production}/complete', [\App\Http\Controllers\ProductionController::class, 'complete'])->name('production.complete');
-    Route::post('/{production}/cancel', [\App\Http\Controllers\ProductionController::class, 'cancel'])->name('production.cancel');
+    Route::get('/', [ProductionController::class, 'index'])->name('production.index');
+    Route::post('/', [ProductionController::class, 'store'])->name('production.store');
+    Route::post('/{production}/complete', [ProductionController::class, 'complete'])->name('production.complete');
+    Route::post('/{production}/cancel', [ProductionController::class, 'cancel'])->name('production.cancel');
 });
 
 Route::middleware(['auth', 'role:waiter,administrator,programmer'])->prefix('waiter')->group(function () {
@@ -63,16 +69,29 @@ Route::middleware(['auth', 'role:cashier,administrator,programmer'])->prefix('ca
     Route::post('/pos/orders/{order}/details', [PosController::class, 'storeOrderDetail'])->name('cashier.order-details.store');
     Route::put('/pos/order-details/{detail}', [PosController::class, 'updateOrderDetail'])->name('cashier.order-details.update');
     Route::post('/pos/orders/{order}/pay', [PosController::class, 'payOrder'])->name('cashier.pay-order');
+    Route::post('/pos/orders/{order}/reprint', [PosController::class, 'reprint'])->name('cashier.reprint');
     Route::post('/pos/orders/{order}/cancel', [PosController::class, 'cancelOrder'])->name('cashier.cancel-order');
     Route::post('/pos/orders/{order}/transfer', [PosController::class, 'transferOrder'])->name('cashier.transfer-order');
     Route::delete('/pos/order-details/{detail}', [PosController::class, 'destroyOrderDetail'])->name('cashier.order-details.destroy');
     Route::post('/pos/cash-closure', [PosController::class, 'closeCashierDay'])->name('cashier.cash-closure');
     Route::get('/pos/cash-closure/{closure}/pdf', [PosController::class, 'cashierClosurePdf'])->name('cashier.cash-closure.pdf');
     Route::post('/pos/report-z', [PosController::class, 'generateReportZ'])->name('cashier.report-z');
+    Route::get('/fiscal-documents', [FiscalDocumentController::class, 'index'])->name('cashier.fiscal-documents.index');
+    Route::get('/fiscal-documents/{fiscalDocument}', [FiscalDocumentController::class, 'edit'])->name('cashier.fiscal-documents.edit');
+    Route::get('/fiscal-documents/{fiscalDocument}/evidence', [FiscalDocumentController::class, 'evidence'])->name('cashier.fiscal-documents.evidence');
+    Route::get('/fiscal-documents/{fiscalDocument}/export', [FiscalDocumentController::class, 'export'])->name('cashier.fiscal-documents.export');
+    Route::middleware(SerializeFiscalWrites::class)->group(function () {
+        Route::post('/legacy-payments/{order}', [FiscalDocumentController::class, 'reconcilePayment'])->name('cashier.fiscal-documents.reconcile-payment');
+        Route::put('/fiscal-documents/{fiscalDocument}', [FiscalDocumentController::class, 'update'])->name('cashier.fiscal-documents.update');
+        Route::post('/fiscal-documents/{fiscalDocument}/hold', [FiscalDocumentController::class, 'hold'])->name('cashier.fiscal-documents.hold');
+        Route::post('/fiscal-documents/{fiscalDocument}/reactivate', [FiscalDocumentController::class, 'reactivate'])->name('cashier.fiscal-documents.reactivate');
+        Route::post('/fiscal-documents/{fiscalDocument}/manual-submission', [FiscalDocumentController::class, 'markManuallySubmitted'])->name('cashier.fiscal-documents.manual-submission');
+    });
 });
 
 // Administrador
 Route::middleware(['auth', 'role:administrator,programmer'])->prefix('admin')->group(function () {
+    Route::put('/fiscal-settings', [FiscalDocumentController::class, 'updateSettings'])->name('admin.fiscal-settings.update');
     Route::get('/dashboard', [DashboardController::class, 'dashboard'])->name('admin.dashboard');
     Route::post('/monthly-reports/close', [DashboardController::class, 'closeMonthlyReport'])->name('admin.monthly-reports.close');
     Route::get('/monthly-reports/compare', [DashboardController::class, 'compareReports'])->name('admin.monthly-reports.compare');
@@ -103,7 +122,7 @@ Route::middleware(['auth', 'role:administrator,programmer'])->prefix('admin')->g
     Route::delete('/products/{product}', [ProductController::class, 'destroy'])->name('admin.products.destroy');
 
     Route::get('/staff', [StaffUserController::class, 'index'])->name('admin.staff.index');
-    Route::get('/audit', [\App\Http\Controllers\Admin\AuditController::class, 'index'])->name('admin.audit');
+    Route::get('/audit', [AuditController::class, 'index'])->name('admin.audit');
     Route::post('/staff', [StaffUserController::class, 'store'])->name('admin.staff.store');
     Route::put('/staff/{user}', [StaffUserController::class, 'update'])->name('admin.staff.update');
     Route::delete('/staff/{user}', [StaffUserController::class, 'destroy'])->name('admin.staff.destroy');

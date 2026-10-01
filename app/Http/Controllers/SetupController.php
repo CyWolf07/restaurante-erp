@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\RestaurantTable;
+use App\Services\CashierDailyClosureService;
 use App\Services\NetworkSetupService;
 
 class SetupController extends Controller
@@ -15,25 +17,25 @@ class SetupController extends Controller
 
     public function posStatus()
     {
-        $tables = \App\Models\RestaurantTable::active()->ordered()->get()->map(function ($table) {
+        $tables = RestaurantTable::active()->ordered()->get()->map(function ($table) {
             $order = $table->activeOrder();
 
             return [
-                'id'     => $table->id,
+                'id' => $table->id,
                 'number' => $table->number,
-                'name'   => $table->display_name,
+                'name' => $table->display_name,
                 'short_label' => ($table->zone === 'Domicilios' && preg_match('/(\d+)/', (string) $table->name, $m))
-                    ? ('D' . $m[1])
+                    ? ('D'.$m[1])
                     : (string) $table->number,
-                'zone'   => $table->zone,
-                'color'  => $table->status_color,
+                'zone' => $table->zone,
+                'color' => $table->status_color,
                 'status' => $order?->status_label ?? 'Libre',
-                'total'           => $order ? (float) $order->total : 0,
+                'total' => $order ? (float) $order->total : 0,
                 'total_formatted' => $order ? cop($order->total) : '',
-                'url'    => route('cashier.table-detail', $table->number),
+                'url' => route('cashier.table-detail', $table->number),
             ];
         });
 
-        return response()->json(['tables' => $tables, 'updated_at' => now()->toIso8601String()]);
+        return response()->json(['tables' => $tables, 'summary' => app(CashierDailyClosureService::class)->dailySummary(), 'updated_at' => now()->toIso8601String()]);
     }
 }

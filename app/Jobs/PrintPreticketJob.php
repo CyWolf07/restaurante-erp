@@ -16,9 +16,13 @@ class PrintPreticketJob implements ShouldQueue
 
     public function __construct(public Order $order) {}
 
-    public function handle(PrinterService $printer): void
+    public function handle(PrinterService $printer): bool
     {
-        $printer->printPreticket($this->order);
-        $this->order->update(['preticket_printed' => true]);
+        $printed = $printer->printPreticket($this->order);
+        if ($printed) {
+            $this->order->update(['preticket_printed' => true]);
+        }
+
+        return $printed;
     }
 }

@@ -13,6 +13,9 @@
     <meta name="description" content="Sistema ERP de gestión integral para restaurante — {{ config('app.restaurant_name') }}">
     <script src="{{ asset('vendor/chartjs/chart.umd.js') }}"></script>
     @livewireStyles
+    <script>
+        window.erpEscape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    </script>
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -252,7 +255,7 @@
         /* ── Responsive ── */
         @media (max-width: 1024px) {
             .sidebar { width: 72px; }
-            .sidebar-brand h1, .sidebar-brand small, .nav-section-title, .nav-link span,
+            .sidebar-brand h1, .sidebar-brand small, .nav-section-title, .nav-link span:not(.icon),
             .user-name, .user-role { display: none; }
             .sidebar-brand { padding: 1rem; justify-content: center; }
             .nav-link { justify-content: center; padding: 0.75rem; }
@@ -322,7 +325,7 @@
                 border: 0; width: 100%; height: 100%; cursor: pointer;
             }
             .sidebar-backdrop.is-visible { display: block; }
-            .main-content { width: 100%; margin-left: 0; padding: 1rem; overflow: hidden; }
+            .main-content { width: 100%; min-width: 0; margin-left: 0; padding: 1rem; }
             .page-header { align-items: flex-start; flex-direction: column; gap: 0.75rem; margin-bottom: 1.25rem; }
             .page-header > :last-child:not(:first-child) { width: 100%; }
             .page-header .btn { justify-content: center; }
@@ -399,10 +402,11 @@
                 @if(in_array($role, ['cook','administrator','programmer']))
                 <div class="nav-section">
                     <div class="nav-section-title">Cocina</div>
+                    <a href="{{ route('cook.orders') }}" class="nav-link {{ request()->routeIs('cook.orders') ? 'active' : '' }}"><span class="icon">🔔</span><span>Pedidos en cocina</span></a>
                     <a href="{{ route('production.index') }}" class="nav-link {{ request()->routeIs('production.*') ? 'active' : '' }}">
                         <span class="icon">🍲</span><span>Producción por lotes</span>
                     </a>
-                    <a href="{{ route('cook.recipes') }}" class="nav-link {{ request()->routeIs('cook.*') ? 'active' : '' }}">
+                    <a href="{{ route('cook.recipes') }}" class="nav-link {{ request()->routeIs('cook.recipes', 'cook.recipe-detail') ? 'active' : '' }}">
                         <span class="icon">📖</span><span>Fichas Técnicas</span>
                     </a>
                 </div>
@@ -428,6 +432,9 @@
                     </a>
                     <a href="{{ route('cashier.cash-count') }}" class="nav-link {{ request()->routeIs('cashier.cash-count*') ? 'active' : '' }}">
                         <span class="icon">#</span><span>Arqueo de caja</span>
+                    </a>
+                    <a href="{{ route('cashier.fiscal-documents.index') }}" class="nav-link {{ request()->routeIs('cashier.fiscal-documents*') ? 'active' : '' }}">
+                        <span class="icon">🧾</span><span>Facturas pendientes</span>
                     </a>
                     <a href="{{ route('cashier.delivery.create') }}" class="nav-link {{ request()->routeIs('cashier.delivery*') ? 'active' : '' }}">
                         <span class="icon">@</span><span>Domicilios</span>

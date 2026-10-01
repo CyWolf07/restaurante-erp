@@ -3,8 +3,8 @@
 namespace App\Services;
 
 use App\Models\Order;
-use App\Models\PrintTemplate;
 use App\Models\Printer;
+use App\Models\PrintTemplate;
 use Illuminate\Support\Facades\Log;
 use Mike42\Escpos\Printer as EscposPrinter;
 
@@ -20,7 +20,7 @@ class TicketPrintService
         $purpose = $settings['printer_purpose'] ?? ($templateSlug === 'kitchen' ? 'kitchen' : 'receipt');
 
         $printer = $this->printers->resolvePrinter($order, $purpose);
-        if (!$printer) {
+        if (! $printer) {
             Log::info("Sin impresora ({$purpose}) para plantilla {$templateSlug}");
 
             return false;
@@ -49,7 +49,7 @@ class TicketPrintService
 
             return true;
         } catch (\Throwable $e) {
-            Log::error("Ticket print [{$templateSlug}] failed: " . $e->getMessage());
+            Log::error("Ticket print [{$templateSlug}] failed: ".$e->getMessage());
 
             return false;
         }
@@ -71,10 +71,10 @@ class TicketPrintService
         if ($settings['show_restaurant_name'] ?? true) {
             $lines[] = $this->center(config('app.restaurant_name'), $width);
         }
-        if (!empty($settings['title'])) {
+        if (! empty($settings['title'])) {
             $lines[] = $this->center($replace($settings['title']), $width);
         }
-        if (!empty($settings['subtitle'])) {
+        if (! empty($settings['subtitle'])) {
             $lines[] = $this->center($replace($settings['subtitle']), $width);
         }
         foreach ($settings['extra_header_lines'] ?? [] as $line) {
@@ -101,7 +101,7 @@ class TicketPrintService
         if ($settings['show_items'] ?? true) {
             $lines[] = '2x Hamburguesa';
             if ($settings['show_item_subtotal'] ?? true) {
-                $lines[] = '   ' . cop(36000);
+                $lines[] = '   '.cop(36000);
             }
             if ($settings['show_modifiers'] ?? true) {
                 $lines[] = '  + 1x Queso extra';
@@ -113,13 +113,13 @@ class TicketPrintService
 
         $lines[] = str_repeat('-', $width);
         if ($settings['show_subtotal'] ?? false) {
-            $lines[] = 'Subtotal: ' . cop(45000);
+            $lines[] = 'Subtotal: '.cop(45000);
         }
         if ($settings['show_tax'] ?? false) {
-            $lines[] = 'IVA: ' . cop(7200);
+            $lines[] = 'IVA: '.cop(7200);
         }
         if ($settings['show_total'] ?? true) {
-            $lines[] = 'TOTAL: ' . cop(52200);
+            $lines[] = 'TOTAL: '.cop(52200);
         }
         foreach ($settings['footer_lines'] ?? [] as $line) {
             if (trim($line) !== '') {
@@ -135,29 +135,29 @@ class TicketPrintService
         $escpos->setJustification(EscposPrinter::JUSTIFY_CENTER);
 
         if ($s['show_restaurant_name'] ?? true) {
-            $escpos->text(config('app.restaurant_name') . "\n");
+            $escpos->text(config('app.restaurant_name')."\n");
         }
 
-        if (!empty($s['title'])) {
+        if (! empty($s['title'])) {
             if ($s['title_bold'] ?? true) {
                 $escpos->setEmphasis(true);
             }
-            $escpos->text(($s['title']) . "\n");
+            $escpos->text(($s['title'])."\n");
             $escpos->setEmphasis(false);
         }
 
-        if (!empty($s['subtitle'])) {
-            $escpos->text($s['subtitle'] . "\n");
+        if (! empty($s['subtitle'])) {
+            $escpos->text($s['subtitle']."\n");
         }
 
         foreach ($s['extra_header_lines'] ?? [] as $line) {
             $line = trim($line);
             if ($line !== '') {
-                $escpos->text($line . "\n");
+                $escpos->text($line."\n");
             }
         }
 
-        $escpos->text(str_repeat('-', $width) . "\n");
+        $escpos->text(str_repeat('-', $width)."\n");
         $escpos->setJustification(EscposPrinter::JUSTIFY_LEFT);
     }
 
@@ -178,7 +178,7 @@ class TicketPrintService
         }
 
         if ($s['show_waiter'] ?? true) {
-            $escpos->text('Mesero: ' . ($order->waiter->name ?? '—') . "\n");
+            $escpos->text('Mesero: '.($order->waiter->name ?? '—')."\n");
         }
 
         if (($s['show_kitchen_sender'] ?? false) && $slug === 'kitchen') {
@@ -188,10 +188,10 @@ class TicketPrintService
         }
 
         if ($s['show_datetime'] ?? true) {
-            $escpos->text(now()->format('d/m/Y H:i') . "\n");
+            $escpos->text(now()->format('d/m/Y H:i')."\n");
         }
 
-        $escpos->text(str_repeat('-', $width) . "\n");
+        $escpos->text(str_repeat('-', $width)."\n");
 
         if ($s['show_items'] ?? true) {
             foreach ($order->details as $detail) {
@@ -206,7 +206,7 @@ class TicketPrintService
                 }
 
                 if ($s['show_item_subtotal'] ?? false) {
-                    $escpos->text('   ' . cop($detail->subtotal) . "\n");
+                    $escpos->text('   '.cop($detail->subtotal)."\n");
                 }
 
                 if ($s['show_item_comments'] ?? true && $detail->comments) {
@@ -215,22 +215,22 @@ class TicketPrintService
             }
         }
 
-        $escpos->text(str_repeat('-', $width) . "\n");
+        $escpos->text(str_repeat('-', $width)."\n");
     }
 
     private function renderFooter(EscposPrinter $escpos, Order $order, array $s, int $width): void
     {
         if ($s['show_subtotal'] ?? false) {
-            $escpos->text('Subtotal: ' . cop($order->subtotal) . "\n");
+            $escpos->text('Subtotal: '.cop($order->subtotal)."\n");
         }
         if ($s['show_tax'] ?? false) {
-            $escpos->text('IVA: ' . cop($order->tax) . "\n");
+            $escpos->text('Impuestos: '.cop($order->tax)."\n");
         }
         if ($s['show_total'] ?? true) {
             if ($s['total_bold'] ?? true) {
                 $escpos->setEmphasis(true);
             }
-            $escpos->text('TOTAL: ' . cop($order->total) . "\n");
+            $escpos->text('TOTAL: '.cop($order->total)."\n");
             $escpos->setEmphasis(false);
         }
 
@@ -238,7 +238,7 @@ class TicketPrintService
             $line = trim($line);
             if ($line !== '') {
                 $escpos->setJustification(EscposPrinter::JUSTIFY_CENTER);
-                $escpos->text($line . "\n");
+                $escpos->text($line."\n");
                 $escpos->setJustification(EscposPrinter::JUSTIFY_LEFT);
             }
         }
@@ -252,7 +252,7 @@ class TicketPrintService
         }
         $pad = (int) floor(($width - $len) / 2);
 
-        return str_repeat(' ', $pad) . $text;
+        return str_repeat(' ', $pad).$text;
     }
 
     private function connect(Printer $printer): EscposPrinter

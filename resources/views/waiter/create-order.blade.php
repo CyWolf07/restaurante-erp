@@ -2,7 +2,8 @@
 @section('title', 'Nueva Orden — Comandero Digital')
 @push('styles')
 <style>
-    .commander { display: grid; grid-template-columns: 1fr 380px; gap: 1.5rem; min-height: calc(100vh - 8rem); }
+    .commander { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 380px); gap: 1.5rem; min-height: calc(100vh - 8rem); }
+    @media (max-width: 1100px) { .commander { grid-template-columns: minmax(0, 1fr); } }
     .menu-area { overflow-y: auto; }
     .cart-area { position: sticky; top: 2rem; }
     .category-tabs { display: flex; gap: 0.5rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
@@ -73,7 +74,7 @@
         <div class="product-grid" id="product-grid">
             @foreach($categories as $cat)
             @foreach($cat->products as $product)
-            <div class="product-card" data-category="{{ $cat->id }}" onclick="onProductClick('{{ $product->id }}', '{{ addslashes($product->name) }}', {{ $product->price }})">
+            <div class="product-card" data-category="{{ $cat->id }}" data-product="{{ $product->id }}" data-name="{{ $product->name }}" data-price="{{ $product->price }}" onclick="onProductClick(this.dataset.product, this.dataset.name, Number(this.dataset.price))">
                 <div class="product-card-img">🍽️</div>
                 <div class="product-card-body">
                     <div class="product-card-name">{{ $product->name }}</div>
@@ -169,11 +170,11 @@ function onProductClick(id, name, price) {
     let html = '';
     for (const [group, opts] of Object.entries(options)) {
         const isSoup = group.toLowerCase() === 'sopa';
-        html += `<div class="opt-group-label">${isSoup ? '🍲' : group.toLowerCase().startsWith('sin') ? '❌' : group.toLowerCase().startsWith('extra') ? '➕' : '🔧'} ${group}</div>`;
-        html += `<div class="opt-chips" data-group="${group}" data-mode="${isSoup ? 'radio' : 'check'}">`;
+        html += `<div class="opt-group-label">${isSoup ? '🍲' : group.toLowerCase().startsWith('sin') ? '❌' : group.toLowerCase().startsWith('extra') ? '➕' : '🔧'} ${erpEscape(group)}</div>`;
+        html += `<div class="opt-chips" data-group="${erpEscape(group)}" data-mode="${isSoup ? 'radio' : 'check'}">`;
         for (const opt of opts) {
-            html += `<label class="opt-chip ${isSoup ? 'radio-mode' : ''}" data-id="${opt.id}" data-group="${group}" onclick="toggleOpt(this, '${isSoup ? 'radio' : 'check'}')">
-                ${opt.name}
+            html += `<label class="opt-chip ${isSoup ? 'radio-mode' : ''}" data-id="${erpEscape(opt.id)}" data-group="${erpEscape(group)}" onclick="toggleOpt(this, '${isSoup ? 'radio' : 'check'}')">
+                ${erpEscape(opt.name)}
             </label>`;
         }
         html += `</div>`;
@@ -186,7 +187,7 @@ function toggleOpt(chip, mode) {
     if (mode === 'radio') {
         // Solo uno por grupo
         const group = chip.dataset.group;
-        document.querySelectorAll(`.opt-chip[data-group="${group}"]`).forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.opt-chip').forEach(c => { if (c.dataset.group === group) c.classList.remove('active'); });
         chip.classList.add('active');
     } else {
         chip.classList.toggle('active');
@@ -234,15 +235,15 @@ function renderCart() {
         total += subtotal;
         let optionsHtml = '';
         if (item.modifiers.length > 0) {
-            optionsHtml = '<div class="cart-options">' + item.modifiers.map(m => `<span class="cart-option-tag">${m.name}</span>`).join('') + '</div>';
+            optionsHtml = '<div class="cart-options">' + item.modifiers.map(m => `<span class="cart-option-tag">${erpEscape(m.name)}</span>`).join('') + '</div>';
         }
         html += `<div class="cart-item">
             <div style="flex:1;">
-                <div style="font-weight:600;font-size:0.85rem;">${item.name}</div>
+                <div style="font-weight:600;font-size:0.85rem;">${erpEscape(item.name)}</div>
                 <div style="font-size:0.75rem;color:var(--text-muted);">${formatCop(item.price)} c/u</div>
                 ${optionsHtml}
-                ${item.comments ? `<div style="font-size:0.7rem;color:var(--warning);margin-top:0.2rem;">💬 ${item.comments}</div>` : ''}
-                <input type="text" class="form-input" style="margin-top:0.4rem;padding:0.3rem 0.5rem;font-size:0.75rem;" placeholder="Comentarios cocina..." value="${item.comments}" onchange="cart[${i}].comments=this.value;">
+                ${item.comments ? `<div style="font-size:0.7rem;color:var(--warning);margin-top:0.2rem;">💬 ${erpEscape(item.comments)}</div>` : ''}
+                <input type="text" class="form-input" style="margin-top:0.4rem;padding:0.3rem 0.5rem;font-size:0.75rem;" placeholder="Comentarios cocina..." value="${erpEscape(item.comments)}" onchange="cart[${i}].comments=this.value;">
             </div>
             <div class="cart-item-qty">
                 <button class="qty-btn" onclick="changeQty(${i},-1)">−</button>
@@ -263,19 +264,20 @@ function submitOrder() {
     if (cart.length === 0) { alert('Agrega al menos un plato.'); return; }
     const form = document.createElement('form');
     form.method = 'POST'; form.action = @json($storeRoute ?? route("waiter.store-order"));
-    form.innerHTML = `<input type="hidden" name="_token" value="{{ csrf_token() }}">`;
-    form.innerHTML += `<input type="hidden" name="restaurant_table_id" value="${document.getElementById('table-select').value}">`;
+    const field = (name, value) => { const input = document.createElement('input'); input.type = 'hidden'; input.name = name; input.value = value; form.appendChild(input); };
+    field('_token', @json(csrf_token()));
+    field('restaurant_table_id', document.getElementById('table-select').value);
     cart.forEach((item, i) => {
-        form.innerHTML += `<input type="hidden" name="items[${i}][product_id]" value="${item.product_id}">`;
-        form.innerHTML += `<input type="hidden" name="items[${i}][quantity]" value="${item.quantity}">`;
+        field(`items[${i}][product_id]`, item.product_id);
+        field(`items[${i}][quantity]`, item.quantity);
         // Combinar opciones seleccionadas con comentarios
         let fullComments = item.modifiers.map(m => m.name).join(', ');
         if (item.comments) fullComments += (fullComments ? ' | ' : '') + item.comments;
-        form.innerHTML += `<input type="hidden" name="items[${i}][comments]" value="${fullComments}">`;
+        field(`items[${i}][comments]`, fullComments);
         // Enviar modificadores como IDs
         item.modifiers.forEach((mod, j) => {
-            form.innerHTML += `<input type="hidden" name="items[${i}][modifiers][${j}][modifier_id]" value="${mod.modifier_id}">`;
-            form.innerHTML += `<input type="hidden" name="items[${i}][modifiers][${j}][quantity]" value="1">`;
+            field(`items[${i}][modifiers][${j}][modifier_id]`, mod.modifier_id);
+            field(`items[${i}][modifiers][${j}][quantity]`, 1);
         });
     });
     document.body.appendChild(form);

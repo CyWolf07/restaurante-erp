@@ -13,8 +13,10 @@ use App\Models\ProductCategory;
 use App\Models\RestaurantTable;
 use App\Services\InventoryEngine;
 use App\Services\PosOperationService;
+use App\Support\Money;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -117,7 +119,7 @@ class WaiterController extends Controller
                     'quantity' => $item['quantity'],
                     'unit_price' => $product->price,
                     'discount' => 0,
-                    'subtotal' => \App\Support\Money::lineTotal($product->price, (int) $item['quantity']),
+                    'subtotal' => Money::lineTotal($product->price, (int) $item['quantity']),
                     'comments' => $item['comments'] ?? null,
                 ]);
 
@@ -131,7 +133,7 @@ class WaiterController extends Controller
                             'modifier_id' => $modifier->id,
                             'quantity' => $qty,
                             'unit_price' => $modifier->price,
-                            'subtotal' => \App\Support\Money::lineTotal($modifier->price, (int) $qty),
+                            'subtotal' => Money::lineTotal($modifier->price, (int) $qty),
                         ]);
                     }
                 }
@@ -146,12 +148,12 @@ class WaiterController extends Controller
             return $order->fresh();
         });
 
-        PrintPreticketJob::dispatchSync($order);
+        $printed = Bus::dispatchNow(new PrintPreticketJob($order));
 
         $redirectRoute = $request->routeIs('cashier.delivery.store') ? 'cashier.pos' : 'waiter.orders';
 
         return redirect()->route($redirectRoute)
-            ->with('success', "Orden Mesa #{$order->table_number} creada. Inventario reservado y pre-ticket impreso.");
+            ->with($printed === false ? 'warning' : 'success', "Orden Mesa #{$order->table_number} creada. Inventario reservado. ".($printed === false ? 'No se pudo imprimir el pre-ticket; puedes reintentarlo sin crear otra venta.' : 'Pre-ticket enviado a impresora.'));
     }
 
     public function sendToKitchen(Order $order)
@@ -168,10 +170,11 @@ class WaiterController extends Controller
                 'kitchen_sent_by' => Auth::id(),
                 'kitchen_sent_at' => now(),
             ]);
+            $order->details()->whereNull('kitchen_sent_at')->update(['kitchen_sent_at' => $order->kitchen_sent_at]);
         });
-        PrintKitchenTicketJob::dispatchSync($order->fresh(['waiter', 'kitchenSentBy']));
+        $printed = Bus::dispatchNow(new PrintKitchenTicketJob($order->fresh(['waiter', 'kitchenSentBy'])));
 
-        return back()->with('success', "Orden Mesa #{$order->table_number} enviada a cocina e impresa.");
+        return back()->with($printed === false ? 'warning' : 'success', "Orden Mesa #{$order->table_number} enviada a cocina. ".($printed === false ? 'Falló la impresión; avisa a cocina y reimprime desde caja.' : 'Comanda enviada a impresora.'));
     }
 
     public function printPreticket(Order $order)
@@ -184,9 +187,9 @@ class WaiterController extends Controller
             return back()->with('error', 'No se puede imprimir pre-ticket de una orden cerrada.');
         }
 
-        PrintPreticketJob::dispatchSync($order->fresh(['details.product', 'details.modifiers.modifier', 'waiter', 'restaurantTable']));
+        $printed = Bus::dispatchNow(new PrintPreticketJob($order->fresh(['details.product', 'details.modifiers.modifier', 'waiter', 'restaurantTable'])));
 
-        return back()->with('success', "Pre-ticket Mesa #{$order->table_number} enviado a impresora.");
+        return back()->with($printed === false ? 'warning' : 'success', $printed === false ? 'No se pudo imprimir. Revisa la impresora y reintenta.' : "Pre-ticket Mesa #{$order->table_number} enviado a impresora.");
     }
 
     private function ensureDeliveryTables(): void

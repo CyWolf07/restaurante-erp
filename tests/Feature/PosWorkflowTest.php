@@ -16,6 +16,7 @@ use App\Models\Supply;
 use App\Models\User;
 use App\Services\CashierDailyClosureService;
 use App\Services\InventoryEngine;
+use App\Services\PrinterService;
 use App\Services\ReportZService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Bus;
@@ -74,6 +75,86 @@ class PosWorkflowTest extends TestCase
         $this->assertDatabaseCount('orders', 1);
         $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
         $this->assertDatabaseHas('inventory_logs', ['type' => 'sale_reserved', 'quantity' => -200]);
+    }
+
+    public function test_shortage_rolls_back_order_and_stock(): void
+    {
+        $this->supply->update(['current_stock' => 100]);
+        $this->actingAs($this->waiter)->post(route('waiter.store-order'), $this->orderInput())->assertSessionHasErrors('inventory');
+        $this->assertDatabaseCount('orders', 0);
+        $this->assertSame(100.0, (float) $this->supply->fresh()->current_stock);
+    }
+
+    public function test_print_failure_is_visible_without_reversing_the_sale(): void
+    {
+        $order = $this->createOrder();
+        Bus::fake()->except(PrintReceiptJob::class);
+        $this->mock(PrinterService::class)->shouldReceive('printReceipt')->once()->andReturnFalse();
+        $this->actingAs($this->cashier)->post(route('cashier.pay-order', $order), ['expected_total' => 2000])
+            ->assertSessionHas('warning')->assertSessionHasNoErrors();
+        $this->assertSame('paid', $order->fresh()->status);
+        $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
+        $this->post(route('cashier.pay-order', $order), ['expected_total' => 2000])->assertSessionHas('error');
+    }
+
+    public function test_kitchen_can_mark_ready_but_cannot_collect_payment(): void
+    {
+        $order = $this->createOrder();
+        $this->post(route('waiter.send-kitchen', $order));
+        $this->actingAs(User::factory()->create(['role' => 'cook']))->get(route('cook.orders'))->assertOk()->assertSee('Almuerzo');
+        $this->post(route('cook.mark-ready', $order))->assertSessionHasNoErrors();
+        $this->assertSame('ready', $order->fresh()->status);
+        $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
+        $this->post(route('cashier.pay-order', $order), ['expected_total' => 2000])->assertForbidden();
+    }
+
+    public function test_product_tax_is_captured_before_catalog_or_general_rate_changes(): void
+    {
+        $this->product->update(['tax_type' => 'INC', 'tax_rate' => '0.0800']);
+        $order = $this->createOrder();
+        $this->assertSame(2160.0, (float) $order->total);
+        $this->product->update(['tax_rate' => '0.1900']);
+        config(['app.tax_rate' => 0.19]);
+        $order->recalculateTotals();
+        $this->assertSame(2160.0, (float) $order->fresh()->total);
+        $this->assertSame('INC', $order->details()->sole()->tax_type);
+    }
+
+    public function test_comment_edit_preserves_sale_price_and_inventory_after_kitchen(): void
+    {
+        $order = $this->createOrder();
+        $this->post(route('waiter.send-kitchen', $order))->assertSessionHasNoErrors();
+        $this->product->update(['price' => 2000]);
+        $this->actingAs($this->cashier)->put(route('cashier.order-details.update', $order->details()->sole()), [
+            'product_id' => $this->product->id, 'quantity' => 2, 'comments' => 'Sin cebolla',
+        ])->assertSessionHasNoErrors();
+        $this->assertSame(2000.0, (float) $order->fresh()->total);
+        $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
+        $this->assertDatabaseCount('inventory_logs', 1);
+    }
+
+    public function test_kitchen_cancellation_records_waste_without_restoring_consumed_stock(): void
+    {
+        $order = $this->createOrder();
+        $this->post(route('waiter.send-kitchen', $order))->assertSessionHasNoErrors();
+        $this->actingAs($this->cashier)->post(route('cashier.cancel-order', $order), ['reason' => 'Cliente canceló comida preparada'])->assertSessionHasNoErrors();
+        $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
+        $this->assertDatabaseHas('inventory_logs', ['type' => 'manual_waste', 'quantity' => -200]);
+        $this->assertSame('cancelled', $order->fresh()->status);
+    }
+
+    public function test_cancellation_distinguishes_prepared_details_from_unsent_additions(): void
+    {
+        $order = $this->createOrder();
+        $this->post(route('waiter.send-kitchen', $order));
+        $this->actingAs($this->cashier)->post(route('cashier.order-details.store', $order), [
+            'product_id' => $this->product->id, 'quantity' => 1,
+        ])->assertSessionHasNoErrors();
+        $this->assertSame(700.0, (float) $this->supply->fresh()->current_stock);
+        $this->post(route('cashier.cancel-order', $order), ['reason' => 'Cancelar platos y reserva nueva'])->assertSessionHasNoErrors();
+        $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
+        $this->assertSame(-200.0, (float) InventoryLog::where('type', 'manual_waste')->sum('quantity'));
+        $this->assertSame(100.0, (float) InventoryLog::where('type', 'sale_reversal')->sum('quantity'));
     }
 
     public function test_inactive_tables_and_products_cannot_be_ordered(): void
@@ -164,7 +245,7 @@ class PosWorkflowTest extends TestCase
         $this->assertTrue($order->fresh()->isPaid());
         $this->assertSame(800.0, (float) $this->supply->fresh()->current_stock);
         $this->assertSame(1, InventoryLog::where('type', 'sale_confirmed')->count());
-        Bus::assertDispatchedSync(PrintReceiptJob::class, 1);
+        Bus::assertDispatched(PrintReceiptJob::class, 1);
         $this->assertSame(1, DB::table('order_events')->where('action', 'paid')->count());
     }
 
@@ -182,7 +263,7 @@ class PosWorkflowTest extends TestCase
         $this->assertTrue($order->fresh()->isPending());
         $this->assertNull($order->fresh()->inventory_confirmed_at);
         $this->assertSame(0, InventoryLog::where('type', 'sale_confirmed')->count());
-        Bus::assertNotDispatchedSync(PrintReceiptJob::class);
+        Bus::assertNotDispatched(PrintReceiptJob::class);
     }
 
     public function test_locked_orders_cannot_be_paid_or_modified(): void

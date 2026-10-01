@@ -12,18 +12,23 @@ use App\Models\OrderDetail;
 use App\Models\OrderDetailModifier;
 use App\Models\Product;
 use App\Models\RestaurantTable;
+use App\Services\AuditService;
 use App\Services\CashierDailyClosureService;
+use App\Services\FiscalDocumentService;
 use App\Services\InventoryEngine;
 use App\Services\PosOperationService;
 use App\Services\ReportZService;
+use App\Support\Money;
+use Brick\Math\BigDecimal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class PosController extends Controller
 {
-    public function pos(CashierDailyClosureService $cashierClosures)
+    public function pos(CashierDailyClosureService $cashierClosures, FiscalDocumentService $fiscalDocuments)
     {
         $tables = RestaurantTable::active()->ordered()->get()->map(function (RestaurantTable $table) {
             $order = $table->activeOrder();
@@ -46,10 +51,11 @@ class PosController extends Controller
         });
 
         $cashierClosureSummary = $cashierClosures->dailySummary();
+        $fiscalPendingSummary = $fiscalDocuments->unsentSummary();
         $cashierClosure = CashierDailyClosure::whereDate('fiscal_date', today())->first();
         $cashierClosureExists = $cashierClosure !== null;
 
-        return view('cashier.pos', compact('tables', 'cashierClosureSummary', 'cashierClosure', 'cashierClosureExists'));
+        return view('cashier.pos', compact('tables', 'cashierClosureSummary', 'cashierClosure', 'cashierClosureExists', 'fiscalPendingSummary'));
     }
 
     public function tableDetail(int $table)
@@ -89,9 +95,23 @@ class PosController extends Controller
                 throw ValidationException::withMessages(['order' => 'La orden no está en cocina.']);
             }
             $order->update(['status' => 'ready']);
+            app(PosOperationService::class)->record($order, 'ready', ['source' => 'kitchen_or_cashier']);
         });
 
         return back()->with('success', 'Orden marcada como lista.');
+    }
+
+    public function reprint(Request $request, Order $order)
+    {
+        $data = $request->validate(['purpose' => ['required', Rule::in(['kitchen', 'receipt'])]]);
+        if (($data['purpose'] === 'receipt' && ! $order->isPaid()) || ($data['purpose'] === 'kitchen' && ! $order->kitchen_sent_at)) {
+            throw ValidationException::withMessages(['purpose' => 'No corresponde reimprimir ese documento para esta orden.']);
+        }
+        $job = $data['purpose'] === 'receipt' ? new PrintReceiptJob($order) : new PrintKitchenTicketJob($order);
+        $printed = Bus::dispatchNow($job);
+        app(PosOperationService::class)->record($order, 'reprint_requested', ['purpose' => $data['purpose'], 'sent_to_printer' => $printed === true]);
+
+        return back()->with($printed === false ? 'warning' : 'success', $printed === false ? 'No se pudo imprimir. No se modificó la venta.' : 'Reimpresión enviada a impresora; no crea otra venta.');
     }
 
     public function sendToKitchen(Order $order)
@@ -106,11 +126,12 @@ class PosController extends Controller
                 'kitchen_sent_by' => Auth::id(),
                 'kitchen_sent_at' => now(),
             ]);
+            $order->details()->whereNull('kitchen_sent_at')->update(['kitchen_sent_at' => $order->kitchen_sent_at]);
         });
 
-        PrintKitchenTicketJob::dispatchSync($order->fresh(['waiter', 'kitchenSentBy', 'restaurantTable']));
+        $printed = Bus::dispatchNow(new PrintKitchenTicketJob($order->fresh(['waiter', 'kitchenSentBy', 'restaurantTable'])));
 
-        return back()->with('success', "Orden Mesa #{$order->table_number} enviada a cocina e impresa.");
+        return back()->with($printed === false ? 'warning' : 'success', "Orden Mesa #{$order->table_number} enviada a cocina. ".($printed === false ? 'Falló la impresión; avisa a cocina y reintenta la impresión.' : 'Comanda enviada a impresora.'));
     }
 
     public function destroyOrderDetail(Request $request, OrderDetail $detail, InventoryEngine $engine)
@@ -177,11 +198,11 @@ class PosController extends Controller
 
         $product = Product::active()->findOrFail($data['product_id']);
         $quantity = (int) $data['quantity'];
-        $grossSubtotal = \App\Support\Money::lineTotal($product->price, $quantity);
+        $grossSubtotal = Money::lineTotal($product->price, $quantity);
         $discount = (string) ($data['discount'] ?? '0');
-        \App\Support\Money::lineTotal($product->price, $quantity, $discount);
+        Money::lineTotal($product->price, $quantity, $discount);
 
-        app(PosOperationService::class)->run(function () use ($order, $product, $quantity, $grossSubtotal, $discount, $data, $engine) {
+        app(PosOperationService::class)->run(function () use ($order, $product, $quantity, $discount, $data, $engine) {
             $order = app(PosOperationService::class)->editableOrder($order->id);
             $detail = OrderDetail::create([
                 'order_id' => $order->id,
@@ -189,7 +210,7 @@ class PosController extends Controller
                 'quantity' => $quantity,
                 'unit_price' => $product->price,
                 'discount' => $discount,
-                'subtotal' => \App\Support\Money::lineTotal($product->price, $quantity, $discount),
+                'subtotal' => Money::lineTotal($product->price, $quantity, $discount),
                 'comments' => $data['comments'] ?? null,
             ]);
 
@@ -202,7 +223,7 @@ class PosController extends Controller
                         'modifier_id' => $modifier->id,
                         'quantity' => $qty,
                         'unit_price' => $modifier->price,
-                        'subtotal' => \App\Support\Money::lineTotal($modifier->price, (int) $qty),
+                        'subtotal' => Money::lineTotal($modifier->price, (int) $qty),
                     ]);
                 }
             }
@@ -241,22 +262,29 @@ class PosController extends Controller
 
         $product = Product::active()->findOrFail($data['product_id']);
         $quantity = (int) $data['quantity'];
-        $grossSubtotal = \App\Support\Money::lineTotal($product->price, $quantity);
         $discount = (string) ($data['discount'] ?? '0');
-        \App\Support\Money::lineTotal($product->price, $quantity, $discount);
 
-        app(PosOperationService::class)->run(function () use ($detail, $engine, $order, $product, $quantity, $discount, $grossSubtotal, $data) {
+        app(PosOperationService::class)->run(function () use ($detail, $engine, $order, $product, $quantity, $discount, $data) {
             $order = app(PosOperationService::class)->editableOrder($order->id);
             $detail = $order->details()->findOrFail($detail->id);
             $before = $detail->only(['product_id', 'quantity', 'discount', 'comments']);
-            $engine->reverseReservationForDetail($detail->load('product'));
+            $inventoryChanged = $detail->product_id !== $product->id || (int) $detail->quantity !== $quantity;
+            if ($inventoryChanged && $detail->kitchen_sent_at) {
+                throw ValidationException::withMessages(['quantity' => 'El plato ya fue enviado a cocina. Retíralo con motivo (se registra merma) y agrega el reemplazo; no se repone inventario automáticamente.']);
+            }
+            $unitPrice = $detail->product_id === $product->id ? $detail->unit_price : $product->price;
+            if ($inventoryChanged) {
+                $engine->reverseReservationForDetail($detail->load('product'));
+            }
 
             $detail->update([
                 'product_id' => $product->id,
                 'quantity' => $quantity,
-                'unit_price' => $product->price,
+                'unit_price' => $unitPrice,
+                'tax_type' => $detail->product_id === $product->id ? $detail->tax_type : ($product->tax_type ?? 'configured'),
+                'tax_rate' => $detail->product_id === $product->id ? $detail->tax_rate : ($product->tax_rate ?? config('app.tax_rate', 0)),
                 'discount' => $discount,
-                'subtotal' => \App\Support\Money::lineTotal($product->price, $quantity, $discount),
+                'subtotal' => Money::lineTotal($unitPrice, $quantity, $discount),
                 'comments' => $data['comments'] ?? null,
             ]);
 
@@ -264,12 +292,14 @@ class PosController extends Controller
                 $detail->modifiers()->delete();
             }
 
-            if ($order->isInKitchen() || $order->isReady()) {
+            if ($inventoryChanged && ($order->isInKitchen() || $order->isReady())) {
                 $order->update(['status' => 'pending']);
             }
 
             $order->refresh()->recalculateTotals();
-            $engine->reserveForDetail($detail->fresh(['product.recipes.supply', 'modifiers.modifier.supply']));
+            if ($inventoryChanged) {
+                $engine->reserveForDetail($detail->fresh(['product.recipes.supply', 'modifiers.modifier.supply']));
+            }
             app(PosOperationService::class)->record($order, 'detail_updated', [
                 'detail_id' => $detail->id,
                 'before' => $before,
@@ -287,7 +317,13 @@ class PosController extends Controller
             return back()->with('error', 'Esta orden ya fue procesada.');
         }
 
-        $data = $request->validate(['expected_total' => 'required|numeric|min:0']);
+        $request->mergeIfMissing(['payment_method' => 'cash']);
+        $data = $request->validate([
+            'expected_total' => 'required|numeric|min:0',
+            'payment_method' => ['required', Rule::in(['cash', 'card', 'transfer', 'mixed', 'other'])],
+            'payments' => 'nullable|array',
+            'payments.*' => 'numeric|decimal:0,2|min:0',
+        ]);
         app(PosOperationService::class)->run(function () use ($order, $engine, $data) {
             $order = app(PosOperationService::class)->editableOrder($order->id);
             if (! $order->details()->exists()) {
@@ -298,17 +334,30 @@ class PosController extends Controller
                 throw ValidationException::withMessages(['expected_total' => 'El total cambió. Actualiza la pantalla y confirma el nuevo valor.']);
             }
             $engine->confirmForOrder($order);
-            $order->update(['status' => 'paid', 'cashier_id' => Auth::id()]);
+            $payments = $data['payment_method'] === 'mixed' ? ($data['payments'] ?? []) : [$data['payment_method'] => $order->total];
+            $sum = BigDecimal::zero();
+            foreach ($payments as $method => $amount) {
+                if (! in_array($method, ['cash', 'card', 'transfer', 'other'], true)) {
+                    throw ValidationException::withMessages(['payments' => 'Medio de pago inválido.']);
+                }
+                $sum = $sum->plus((string) $amount);
+            }
+            if (! $sum->isEqualTo($order->total)) {
+                throw ValidationException::withMessages(['payments' => 'Los pagos deben sumar exactamente el total de la cuenta.']);
+            }
+            $order->update(['status' => 'paid', 'cashier_id' => Auth::id(), 'payment_breakdown' => $payments]);
+            app(FiscalDocumentService::class)->createDraftForPaidOrder($order->fresh(), Auth::user(), $data['payment_method']);
             app(PosOperationService::class)->record($order, 'paid', ['total' => $order->total]);
         });
         $order->refresh();
 
+        $printed = true;
         if ($request->boolean('print_receipt', true)) {
-            PrintReceiptJob::dispatchSync($order->fresh());
+            $printed = Bus::dispatchNow(new PrintReceiptJob($order->fresh()));
         }
 
         return redirect()->route('cashier.pos')
-            ->with('success', 'Orden Mesa #'.$order->table_number.' cobrada: '.cop($order->total));
+            ->with($printed === false ? 'warning' : 'success', 'Orden Mesa #'.$order->table_number.' cobrada: '.cop($order->total).'. Borrador fiscal creado para revisión; no ha sido transmitido.'.($printed === false ? ' Falló la impresión del recibo. No vuelvas a cobrar esta venta.' : ''));
     }
 
     public function cancelOrder(Request $request, Order $order, InventoryEngine $engine)
@@ -329,7 +378,7 @@ class PosController extends Controller
         });
 
         return redirect()->route('cashier.pos')
-            ->with('success', "Orden Mesa #{$order->table_number} cancelada. Inventario revertido.");
+            ->with('success', "Orden Mesa #{$order->table_number} cancelada. Los ingredientes enviados a cocina se registran como merma; solo las reservas no enviadas se restituyen.");
     }
 
     public function transferOrder(Request $request, Order $order, PosOperationService $operations)
@@ -391,11 +440,17 @@ class PosController extends Controller
 
     public function cashierClosurePdf(CashierDailyClosure $closure)
     {
-        if (! $closure->pdf_local_path || ! file_exists($closure->pdf_local_path)) {
-            abort(404, 'El PDF del cierre de caja no existe en disco.');
-        }
+        try {
+            if (! $closure->pdf_local_path || ! file_exists($closure->pdf_local_path)) {
+                $closure->update(['pdf_local_path' => app(CashierDailyClosureService::class)->generatePdf($closure->load('cashier'))]);
+            }
 
-        return response()->file($closure->pdf_local_path);
+            return response()->file($closure->pdf_local_path);
+        } catch (\Throwable $error) {
+            report($error);
+
+            return redirect()->route('cashier.pos')->with('error', 'No se pudo recuperar el PDF. El cierre sigue guardado; revisa el almacenamiento y vuelve a intentarlo.');
+        }
     }
 
     public function cashCount()
@@ -449,7 +504,7 @@ class PosController extends Controller
                     'notes' => $data['notes'] ?? null,
                 ]
             );
-            app(\App\Services\AuditService::class)->record('cash_count', $count->id, 'cash_count_saved', [
+            app(AuditService::class)->record('cash_count', $count->id, 'cash_count_saved', [
                 'before' => $previous?->only(['base_counts', 'change_counts', 'sales_counts', 'declared_cash_total', 'notes']),
                 'after' => $count->only(['base_counts', 'change_counts', 'sales_counts', 'declared_cash_total', 'notes']),
             ]);

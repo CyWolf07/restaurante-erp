@@ -9,6 +9,7 @@ use App\Models\OrderDetail;
 use App\Models\Supply;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class InventoryEngine
 {
@@ -60,6 +61,7 @@ class InventoryEngine
         }
 
         DB::transaction(function () use ($order) {
+            $sentDetails = $order->details()->whereNotNull('kitchen_sent_at')->pluck('id')->all();
             $logs = InventoryLog::where('order_id', $order->id)
                 ->where('type', 'sale_reserved')
                 ->whereNull('reversed_at')
@@ -73,6 +75,11 @@ class InventoryEngine
             }
 
             foreach ($logs as $log) {
+                if (in_array($log->order_detail_id, $sentDetails, true) || (! $log->order_detail_id && $order->kitchen_sent_at)) {
+                    $log->update(['type' => 'manual_waste', 'description' => 'Merma por cancelación de plato enviado a cocina: '.$order->id]);
+
+                    continue;
+                }
                 $supply = Supply::where('id', $log->supply_id)->lockForUpdate()->first();
                 if (! $supply) {
                     continue;
@@ -101,6 +108,13 @@ class InventoryEngine
     public function reverseReservationForDetail(OrderDetail $detail): void
     {
         $order = $detail->order;
+
+        if ($detail->kitchen_sent_at && $order && ! $order->inventory_confirmed_at) {
+            InventoryLog::where('order_detail_id', $detail->id)->where('type', 'sale_reserved')->whereNull('reversed_at')
+                ->update(['type' => 'manual_waste', 'description' => 'Merma por retiro de plato enviado a cocina: '.$detail->id]);
+
+            return;
+        }
 
         if (! $order || ! $order->inventory_reserved_at || $order->inventory_confirmed_at) {
             return;
@@ -246,6 +260,10 @@ class InventoryEngine
         }
 
         $newStock = (float) $lockedSupply->current_stock - $quantity;
+        if ($newStock < -0.0000001) {
+            throw ValidationException::withMessages(['inventory' => "Existencias insuficientes de {$lockedSupply->name}. No se registró la operación."]);
+        }
+        $newStock = max(0, $newStock);
         $lockedSupply->update(['current_stock' => $newStock]);
 
         InventoryLog::create([
@@ -278,11 +296,13 @@ class InventoryEngine
         app(PosOperationService::class)->run(function () use ($supply, $quantity, $userId, $reason, $operationKey) {
             $requests = app(InventoryRequestService::class);
             $metadata = $requests->metadata($operationKey, $userId, ['type' => 'manual_waste', 'supply_id' => $supply->id, 'quantity' => $quantity, 'reason' => $reason]);
-            if ($requests->existing($metadata)) { return; }
+            if ($requests->existing($metadata)) {
+                return;
+            }
             $lockedSupply = Supply::where('id', $supply->id)->lockForUpdate()->first();
             $newStock = (float) $lockedSupply->current_stock - $quantity;
             if ($newStock < 0) {
-                throw \Illuminate\Validation\ValidationException::withMessages(['quantity' => 'La merma supera las existencias disponibles.']);
+                throw ValidationException::withMessages(['quantity' => 'La merma supera las existencias disponibles.']);
             }
             $lockedSupply->update(['current_stock' => $newStock]);
 
@@ -306,7 +326,7 @@ class InventoryEngine
     private function validateQuantity(float $quantity): void
     {
         if (! is_finite($quantity) || $quantity < 0.0001) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['quantity' => 'La cantidad debe ser positiva.']);
+            throw ValidationException::withMessages(['quantity' => 'La cantidad debe ser positiva.']);
         }
     }
 }

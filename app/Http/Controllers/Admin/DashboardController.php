@@ -8,8 +8,10 @@ use App\Models\MonthlyReport;
 use App\Models\PhysicalInventory;
 use App\Models\Supply;
 use App\Services\AnalyticsService;
+use App\Services\InventoryCatalogService;
 use App\Services\InventoryEngine;
 use App\Services\MonthlyReportService;
+use App\Services\ReportZService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -68,7 +70,7 @@ class DashboardController extends Controller
     {
         $path = $report->pdf_local_path;
 
-        if (!$path || !file_exists($path)) {
+        if (! $path || ! file_exists($path)) {
             $path = $monthlyReports->regeneratePdf($report);
         }
 
@@ -77,11 +79,21 @@ class DashboardController extends Controller
 
     public function dailyReportPdf(DailyReportZ $report)
     {
-        if (!$report->pdf_local_path || !file_exists($report->pdf_local_path)) {
-            abort(404, 'El PDF del Informe Z no existe en disco.');
-        }
+        try {
+            if (! $report->pdf_local_path || ! file_exists($report->pdf_local_path)) {
+                $report->update(['pdf_local_path' => app(ReportZService::class)->generatePdf($report->only(['total_sales', 'total_tax', 'total_net', 'total_orders_count', 'cancelled_orders_count', 'total_cancelled_amount', 'fiscal_pending_count', 'fiscal_pending_total', 'summary_data']) + [
+                    'fiscal_date' => $report->fiscal_date,
+                    'cashier' => $report->cashier,
+                    'restaurant_name' => config('app.restaurant_name', 'Restaurante'),
+                ])]);
+            }
 
-        return response()->file($report->pdf_local_path);
+            return response()->file($report->pdf_local_path);
+        } catch (\Throwable $error) {
+            report($error);
+
+            return redirect()->route('admin.dashboard')->with('error', 'No se pudo recuperar el PDF del Informe Z. El cierre sigue guardado; revisa el almacenamiento.');
+        }
     }
 
     public function compareReports(Request $request, MonthlyReportService $monthlyReports)
@@ -97,6 +109,7 @@ class DashboardController extends Controller
     public function supplies()
     {
         $supplies = Supply::where('active', true)->orderBy('name')->get();
+
         return view('admin.supplies', compact('supplies'));
     }
 
@@ -110,7 +123,8 @@ class DashboardController extends Controller
             'cost_per_unit' => 'required|numeric|min:0',
             'supplier' => 'nullable|string|max:255',
         ]);
-        app(\App\Services\InventoryCatalogService::class)->create($data, $request->user()->id);
+        app(InventoryCatalogService::class)->create($data, $request->user()->id);
+
         return back()->with('success', 'Insumo creado correctamente.');
     }
 
@@ -118,6 +132,7 @@ class DashboardController extends Controller
     {
         $request->validate(['quantity' => 'required|numeric|decimal:0,4|min:0.0001|max:99999999.9999', 'unit_value' => 'required|numeric|decimal:0,2|min:0|max:99999999.99', 'description' => 'nullable|string|max:1000', 'operation_key' => 'required|uuid']);
         $engine->registerPurchase($supply, $request->quantity, Auth::id(), $request->description, $request->operation_key, (string) $request->unit_value);
+
         return back()->with('success', "Compra de {$request->quantity} {$supply->unit_label} registrada.");
     }
 
@@ -125,21 +140,23 @@ class DashboardController extends Controller
     {
         $request->validate(['quantity' => 'required|numeric|min:0.0001', 'reason' => 'required|string|min:3', 'operation_key' => 'required|uuid']);
         $engine->registerWaste($supply, $request->quantity, Auth::id(), $request->reason, $request->operation_key);
+
         return back()->with('success', "Merma de {$request->quantity} {$supply->unit_label} registrada.");
     }
 
     public function createPhysicalInventory()
     {
         $supplies = Supply::where('active', true)->orderBy('name')->get();
+
         return view('admin.physical-inventory', compact('supplies'));
     }
 
     public function storePhysicalInventory(Request $request, AnalyticsService $analytics)
     {
         $request->validate([
-            'counts'   => 'required|array',
+            'counts' => 'required|array',
             'counts.*' => 'required|numeric|min:0',
-            'notes'    => 'nullable|string',
+            'notes' => 'nullable|string',
         ]);
 
         $inventory = $analytics->analyzePhysicalInventory(
@@ -156,6 +173,7 @@ class DashboardController extends Controller
     {
         $dashboard = $analytics->getInconsistencyDashboard($inventory);
         $inventory->load('admin');
+
         return view('admin.inventory-results', compact('inventory', 'dashboard'));
     }
 }

@@ -24,17 +24,20 @@ class DailyReportZ extends Model
         'pdf_local_path',
         'database_backup_path',
         'summary_data',
+        'fiscal_pending_count',
+        'fiscal_pending_total',
     ];
 
     protected function casts(): array
     {
         return [
-            'fiscal_date'              => 'date',
-            'total_sales'              => 'decimal:2',
-            'total_tax'                => 'decimal:2',
-            'total_net'                => 'decimal:2',
-            'total_cancelled_amount'   => 'decimal:2',
-            'summary_data'             => 'array', // JSONB cast automático
+            'fiscal_date' => 'date',
+            'total_sales' => 'decimal:2',
+            'total_tax' => 'decimal:2',
+            'total_net' => 'decimal:2',
+            'total_cancelled_amount' => 'decimal:2',
+            'summary_data' => 'array', // JSONB cast automático
+            'fiscal_pending_total' => 'decimal:2',
         ];
     }
 
@@ -45,9 +48,6 @@ class DailyReportZ extends Model
 
     public function getPdfUrlAttribute(): ?string
     {
-        if ($this->pdf_local_path && file_exists($this->pdf_local_path)) {
-            return route('admin.daily-reports.pdf', ['report' => $this->id]);
-        }
-        return null;
+        return route('admin.daily-reports.pdf', ['report' => $this->id]);
     }
 }

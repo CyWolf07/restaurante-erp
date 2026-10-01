@@ -7,9 +7,11 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Recipe;
 use App\Models\Supply;
+use App\Services\AuditService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class ProductController extends Controller
 {
@@ -38,7 +40,8 @@ class ProductController extends Controller
         $product = DB::transaction(function () use ($data, $request) {
             $product = Product::create($data);
             $this->syncRecipes($product, $request->input('recipes', []));
-            app(\App\Services\AuditService::class)->record('product', $product->id, 'product_created', ['name' => $product->name, 'recipes' => $request->input('recipes', [])]);
+            app(AuditService::class)->record('product', $product->id, 'product_created', ['name' => $product->name, 'recipes' => $request->input('recipes', [])]);
+
             return $product;
         });
 
@@ -62,7 +65,7 @@ class ProductController extends Controller
                 $this->syncRecipes($locked, $request->input('recipes', []));
                 $locked->increment('recipe_version');
             }
-            app(\App\Services\AuditService::class)->record('product', $locked->id, 'product_updated', [
+            app(AuditService::class)->record('product', $locked->id, 'product_updated', [
                 'before' => $before, 'after' => ['name' => $locked->name, 'price' => $locked->price,
                     'recipe_version' => $locked->recipe_version, 'recipes' => $locked->recipes()->get(['supply_id', 'quantity_required'])->toArray()],
             ]);
@@ -83,20 +86,30 @@ class ProductController extends Controller
 
     private function validateProduct(Request $request, ?Product $product = null): array
     {
-        return $request->validate([
-            'category_id'          => 'nullable|exists:product_categories,id',
-            'name'                 => 'required|string|max:255',
-            'description'          => 'nullable|string',
-            'price'                => 'required|numeric|decimal:0,2|min:0|max:9999999999.99',
-            'preparation_time'     => 'required|integer|min:0',
-            'recipe_instructions'  => 'nullable|string',
-            'active'               => 'sometimes|boolean',
-            'image'                => 'nullable|image|max:4096',
+        $data = $request->validate([
+            'category_id' => 'nullable|exists:product_categories,id',
+            'name' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'price' => 'required|numeric|decimal:0,2|min:0|max:9999999999.99',
+            'tax_type' => 'nullable|in:IVA,INC,excluded,exempt',
+            'tax_rate' => 'nullable|numeric|decimal:0,4|min:0|max:1',
+            'preparation_time' => 'required|integer|min:0',
+            'recipe_instructions' => 'nullable|string',
+            'active' => 'sometimes|boolean',
+            'image' => 'nullable|image|max:4096',
             'recipes' => 'sometimes|array',
             'replace_recipes' => 'sometimes|boolean',
             'recipes.*.supply_id' => 'required|uuid|distinct|exists:supplies,id',
             'recipes.*.quantity_required' => 'required|numeric|min:0.0001',
         ]);
+        if (! empty($data['tax_type']) && ! isset($data['tax_rate'])) {
+            throw ValidationException::withMessages(['tax_rate' => 'Selecciona explícitamente la tasa del impuesto; para excluido/exento usa 0.']);
+        }
+        if (in_array($data['tax_type'] ?? null, ['excluded', 'exempt'], true) && (float) ($data['tax_rate'] ?? 0) !== 0.0) {
+            throw ValidationException::withMessages(['tax_rate' => 'Los productos excluidos o exentos deben tener tasa cero.']);
+        }
+
+        return $data;
     }
 
     private function syncRecipes(Product $product, array $recipes): void
@@ -109,9 +122,9 @@ class ProductController extends Controller
                     continue;
                 }
                 Recipe::create([
-                    'product_id'         => $product->id,
-                    'supply_id'          => $row['supply_id'],
-                    'quantity_required'  => $row['quantity_required'],
+                    'product_id' => $product->id,
+                    'supply_id' => $row['supply_id'],
+                    'quantity_required' => $row['quantity_required'],
                 ]);
             }
         });

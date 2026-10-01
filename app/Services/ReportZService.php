@@ -52,6 +52,7 @@ class ReportZService
 
                 // 4. Generar resumen detallado por categorías (JSONB)
                 $summaryData = $this->buildSummaryData($today);
+                $fiscalPending = app(FiscalDocumentService::class)->unsentSummary();
 
                 // 5. Generar PDF del informe
                 $pdfPath = $this->generatePdf([
@@ -62,6 +63,8 @@ class ReportZService
                     'total_orders_count' => $totalCount,
                     'cancelled_orders_count' => $cancelledCount,
                     'total_cancelled_amount' => $cancelledAmount,
+                    'fiscal_pending_count' => $fiscalPending['count'],
+                    'fiscal_pending_total' => $fiscalPending['total'],
                     'cashier' => $cashier,
                     'summary_data' => $summaryData,
                     'restaurant_name' => config('app.restaurant_name', 'Restaurante'),
@@ -76,6 +79,8 @@ class ReportZService
                     'total_orders_count' => $totalCount,
                     'cancelled_orders_count' => $cancelledCount,
                     'total_cancelled_amount' => $cancelledAmount,
+                    'fiscal_pending_count' => $fiscalPending['count'],
+                    'fiscal_pending_total' => $fiscalPending['total'],
                     'cashier_id' => $cashier->id,
                     'pdf_local_path' => $pdfPath,
                     'summary_data' => $summaryData,
@@ -140,7 +145,7 @@ class ReportZService
     /**
      * Genera el PDF del Informe Z con diseño formal.
      */
-    private function generatePdf(array $data): string
+    public function generatePdf(array $data): string
     {
         $year = $data['fiscal_date']->format('Y');
         $month = $data['fiscal_date']->format('m');

@@ -197,12 +197,15 @@
             @php $discountTotal = $order->details->sum(fn($detail) => (float) ($detail->discount ?? 0)); @endphp
             <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;font-size:0.9rem;color:var(--text-muted);"><span>Descuento:</span><span>{{ cop($discountTotal) }}</span></div>
             <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;font-size:0.9rem;"><span>Subtotal:</span><span>{{ cop($order->subtotal) }}</span></div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;font-size:0.9rem;color:var(--text-muted);"><span>IVA ({{ config('app.tax_rate')*100 }}%):</span><span>{{ cop($order->tax) }}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem;font-size:0.9rem;color:var(--text-muted);"><span>Impuestos por producto:</span><span>{{ cop($order->tax) }}</span></div>
             <div style="display:flex;justify-content:space-between;padding-top:0.75rem;border-top:2px solid var(--border);font-size:1.5rem;font-weight:800;color:var(--accent-hover);"><span>TOTAL:</span><span>{{ cop($order->total) }}</span></div>
         </div>
 
         @if(!$order->isPaid() && !$order->isCancelled() && !$order->isLocked())
         <div style="display:flex;flex-direction:column;gap:0.75rem;">
+            @if($order->kitchen_sent_at)
+            <form method="POST" action="{{ route('cashier.reprint', $order) }}">@csrf<input type="hidden" name="purpose" value="kitchen"><button class="btn btn-ghost">Reimprimir comanda sin reenviar pedido</button></form>
+            @endif
             @if($order->isInKitchen())
             <form action="{{ route('cashier.mark-ready', $order) }}" method="POST">
                 @csrf
@@ -218,10 +221,25 @@
             @endif
 
             @if($order->isReady() || $order->isPending())
-            <form action="{{ route('cashier.pay-order', $order) }}" method="POST" onsubmit="return confirm('¿Confirmar cobro de {{ cop($order->total) }}?')">
+            <form action="{{ route('cashier.pay-order', $order) }}" method="POST" onsubmit="return confirm('¿Confirmar cobro de {{ cop($order->total) }}? Se creará un borrador fiscal sin transmitir.')">
                 @csrf
                 <input type="hidden" name="expected_total" value="{{ $order->total }}">
-                <button type="submit" class="btn btn-primary btn-lg" style="width:100%;justify-content:center;">💳 Cobrar Orden</button>
+                <label class="form-label" for="payment-method">Medio de pago</label>
+                <select id="payment-method" name="payment_method" class="form-select" required style="margin-bottom:0.5rem;">
+                    <option value="cash">Efectivo</option>
+                    <option value="card">Tarjeta</option>
+                    <option value="transfer">Transferencia</option>
+                    <option value="mixed">Pago mixto</option>
+                    <option value="other">Otro</option>
+                </select>
+                <details style="margin-top:0.5rem;"><summary>Desglose para pago mixto</summary>
+                    <p>Selecciona «Pago mixto» arriba y distribuye el total exacto de la cuenta.</p>
+                    @foreach(['cash'=>'Efectivo', 'card'=>'Tarjeta', 'transfer'=>'Transferencia', 'other'=>'Otro'] as $key=>$label)
+                    <label class="form-label">{{ $label }}<input type="number" name="payments[{{ $key }}]" class="form-input" min="0" step="0.01" value="0"></label>
+                    @endforeach
+                </details>
+                <button type="submit" class="btn btn-primary btn-lg" style="width:100%;justify-content:center;margin-top:0.5rem;">💳 Cobrar Orden</button>
+                <p style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem;">Se creará un borrador fiscal local. No se transmite automáticamente.</p>
             </form>
             @endif
 
@@ -240,6 +258,7 @@
 
             <form action="{{ route('cashier.cancel-order', $order) }}" method="POST" onsubmit="return confirm('¿Cancelar esta orden?')">
                 @csrf
+                @if($order->kitchen_sent_at)<p class="alert alert-warning">Fue enviado a cocina: cancelar registra merma sin reponer ingredientes. Una devolución física real requiere un ajuste de inventario autorizado.</p>@endif
                 <input type="text" name="reason" class="form-input" placeholder="Razón de cancelación..." required style="margin-bottom:0.5rem;">
                 <button type="submit" class="btn btn-danger btn-sm" style="width:100%;justify-content:center;">❌ Cancelar Orden</button>
             </form>
@@ -299,10 +318,10 @@ function updateOptionsPanel() {
     let html = '';
     for (const [group, opts] of Object.entries(options)) {
         const isSoup = group.toLowerCase() === 'sopa';
-        html += `<div style="width:100%;"><div class="opt-group-lbl">${group}</div><div style="display:flex;flex-wrap:wrap;gap:0.35rem;">`;
+        html += `<div style="width:100%;"><div class="opt-group-lbl">${erpEscape(group)}</div><div style="display:flex;flex-wrap:wrap;gap:0.35rem;">`;
         opts.forEach(opt => {
-            html += `<span class="opt-chip-td ${isSoup ? 'radio-mode' : ''}" data-id="${opt.id}" data-group="${group}" onclick="toggleOptionChip(this, '${isSoup ? 'radio' : 'check'}')">
-                ${opt.name}
+            html += `<span class="opt-chip-td ${isSoup ? 'radio-mode' : ''}" data-id="${erpEscape(opt.id)}" data-group="${erpEscape(group)}" onclick="toggleOptionChip(this, '${isSoup ? 'radio' : 'check'}')">
+                ${erpEscape(opt.name)}
             </span>`;
         });
         html += `</div></div>`;
@@ -313,7 +332,7 @@ function updateOptionsPanel() {
 function toggleOptionChip(chip, mode) {
     if (mode === 'radio') {
         const group = chip.dataset.group;
-        document.querySelectorAll(`.opt-chip-td[data-group="${group}"]`).forEach(c => c.classList.remove('active'));
+        document.querySelectorAll('.opt-chip-td').forEach(c => { if (c.dataset.group === group) c.classList.remove('active'); });
         chip.classList.add('active');
     } else {
         chip.classList.toggle('active');

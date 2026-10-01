@@ -47,6 +47,10 @@
             <label class="form-label">Descripción</label>
             <textarea name="description" class="form-textarea" rows="2"></textarea>
         </div>
+        <div class="grid grid-2">
+            <div class="form-group"><label class="form-label">Impuesto (definir con contador)</label><select name="tax_type" class="form-select"><option value="">Configuración general</option>@foreach(['IVA','INC','excluded','exempt'] as $type)<option value="{{ $type }}">{{ $type }}</option>@endforeach</select></div>
+            <div class="form-group"><label class="form-label">Tasa decimal: 0.08 = 8%; vacío = general</label><input type="number" name="tax_rate" step="0.0001" min="0" max="1" class="form-input"></div>
+        </div>
         <div class="form-group">
             <label class="form-label">Instrucciones de cocción</label>
             <textarea name="recipe_instructions" class="form-textarea" rows="4" placeholder="Paso 1...&#10;Paso 2..."></textarea>
@@ -96,6 +100,8 @@
                                 @endforeach
                             </select>
                             <input type="number" step="0.01" name="price" class="form-input" value="{{ $product->price }}" style="margin-bottom:0.5rem;">
+                            <label class="form-label">Impuesto</label><select name="tax_type" class="form-select"><option value="">Configuración general</option>@foreach(['IVA','INC','excluded','exempt'] as $type)<option value="{{ $type }}" @selected($product->tax_type === $type)>{{ $type }}</option>@endforeach</select>
+                            <label class="form-label">Tasa decimal (0.08 = 8%; vacío = general)</label><input type="number" name="tax_rate" step="0.0001" min="0" max="1" class="form-input" value="{{ $product->tax_rate }}">
                             <input type="number" name="preparation_time" class="form-input" value="{{ $product->preparation_time }}" style="margin-bottom:0.5rem;">
                             <textarea name="recipe_instructions" class="form-textarea" rows="3" style="margin-bottom:0.5rem;">{{ $product->recipe_instructions }}</textarea>
                             @foreach($product->recipes as $i => $recipe)

@@ -373,9 +373,16 @@ document.getElementById('compareForm')?.addEventListener('submit', async event =
     params.append('reports[]', a);
     params.append('reports[]', b);
 
-    const response = await fetch(`{{ route('admin.monthly-reports.compare') }}?${params.toString()}`, { headers: { 'Accept': 'application/json' } });
+    const panels = document.getElementById('comparePanels');
+    panels.textContent = 'Cargando comparación…';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    try {
+    const response = await fetch(`{{ route('admin.monthly-reports.compare') }}?${params.toString()}`, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+    if (!response.ok) throw new Error('No se pudo cargar la comparación. Vuelve a iniciar sesión si venció tu sesión.');
     const payload = await response.json();
     const reports = payload.reports || [];
+    if (reports.length < 2) throw new Error('No hay dos informes disponibles para comparar.');
 
     document.getElementById('comparePanels').innerHTML = reports.map((report, idx) => {
         const totals = report.totals || {};
@@ -383,7 +390,7 @@ document.getElementById('compareForm')?.addEventListener('submit', async event =
         const delta = Number(totals.gross_profit || 0) - Number(other.gross_profit || 0);
         const cls = delta >= 0 ? 'up' : 'down';
         return `<div class="compare-panel">
-            <div class="kpi-label">${report.label}</div>
+            <div class="kpi-label">${erpEscape(report.label)}</div>
             <div class="kpi-value">${moneyTick(totals.gross_profit)}</div>
             <div class="delta ${cls}">${delta >= 0 ? '+' : ''}${moneyTick(delta)} vs otro mes</div>
             <p class="muted-note">Ventas ${moneyTick(totals.sales)} | Costo ${moneyTick(totals.ingredient_cost)} | Margen ${Number(totals.profit_margin || 0).toFixed(2)}%</p>
@@ -397,6 +404,10 @@ document.getElementById('compareForm')?.addEventListener('submit', async event =
         backgroundColor: index === 0 ? 'rgba(99,102,241,0.72)' : 'rgba(34,197,94,0.72)',
     }));
     compareChart.update();
+    } catch (error) {
+        panels.textContent = error.message || 'No se pudo cargar la comparación. Inténtalo nuevamente.';
+        if (compareChart) { compareChart.data.datasets = []; compareChart.update(); }
+    } finally { clearTimeout(timeout); }
 });
 </script>
 @endpush
