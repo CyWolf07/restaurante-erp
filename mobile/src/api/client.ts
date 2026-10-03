@@ -1,12 +1,11 @@
+import { resolveApiUrl } from './url';
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 
 export async function request<T>(path: string, token?: string, body?: unknown): Promise<T> {
-  const base = process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, '');
-  if (!base || (!base.startsWith('https://') && !(__DEV__ && /^http:\/\/(localhost|127\.0\.0\.1|10\.0\.2\.2)(:\d+)?\//.test(base)))) {
-    throw new Error('Configura EXPO_PUBLIC_API_URL con HTTPS.');
-  }
+  const base = resolveApiUrl(process.env.EXPO_PUBLIC_API_URL, __DEV__);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {

@@ -4,7 +4,7 @@
   "private": true,
   "main": "index.ts",
   "packageManager": "pnpm@10.17.1",
-  "scripts": {"start": "expo start", "android": "expo start --android", "typecheck": "tsc --noEmit", "export": "expo export --platform android --platform ios", "releasecheck": "pnpm typecheck && pnpm audit --prod", "eas-build-post-install": "pnpm releasecheck"},
+  "scripts": {"start": "expo start", "android": "expo start --android", "typecheck": "tsc --noEmit", "test": "node --experimental-strip-types --test tests/*.test.mjs", "export": "expo export --platform android --platform ios", "releasecheck": "pnpm typecheck && pnpm test && pnpm audit --prod", "eas-build-post-install": "pnpm releasecheck"},
   "dependencies": {"expo": "57.0.19", "react": "19.2.3", "react-native": "0.86.3", "expo-status-bar": "57.0.1", "expo-secure-store": "57.0.3", "expo-updates": "57.0.21", "react-native-safe-area-context": "5.7.0"},
   "devDependencies": {"typescript": "~6.0.3", "@types/react": "~19.2.2"}
 }
