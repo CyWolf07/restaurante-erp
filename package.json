@@ -7,6 +7,13 @@
     "scripts": {
         "build": "vite build",
         "dev": "vite",
+        "expo:start": "pnpm --dir mobile run start",
+        "expo:android": "pnpm --dir mobile run android",
+        "expo:info": "pnpm --dir mobile run eas:info",
+        "expo:configure": "pnpm --dir mobile run eas:configure",
+        "expo:check": "pnpm --dir mobile run typecheck && pnpm --dir mobile run test",
+        "expo:apk": "pnpm --dir mobile run build:apk",
+        "expo:aab": "pnpm --dir mobile run build:aab",
         "verify-deps": "node scripts/verify-package-age.mjs",
         "safe-install": "pnpm install --frozen-lockfile && pnpm run verify-deps && pnpm audit --audit-level=moderate",
         "preinstall": "node scripts/require-pnpm.mjs"
