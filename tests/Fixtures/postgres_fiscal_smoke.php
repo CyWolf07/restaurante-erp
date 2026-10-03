@@ -18,7 +18,7 @@ $connection->statement('CREATE DATABASE "'.$name.'"');
 try {
     $process = new Process([
         PHP_BINARY, base_path('vendor/phpunit/phpunit/phpunit'), '--filter',
-        'FiscalDocumentWorkflowTest|PosWorkflowTest|ModifierMigrationsTest',
+        'FiscalDocumentWorkflowTest|PosWorkflowTest|ModifierMigrationsTest|MobileApiTest',
     ], base_path(), [
         'APP_ENV' => 'testing', 'DB_CONNECTION' => 'pgsql', 'DB_DATABASE' => $name,
         'DB_HOST' => $configuration['host'], 'DB_PORT' => (string) $configuration['port'],
@@ -26,7 +26,7 @@ try {
         'DB_URL' => '', 'CACHE_STORE' => 'array', 'SESSION_DRIVER' => 'array',
         'BROADCAST_CONNECTION' => 'null', 'QUEUE_CONNECTION' => 'sync',
     ]);
-    $process->setTimeout(120);
+    $process->setTimeout(300);
     $process->run(fn ($type, $buffer) => print ($buffer));
     $result = $process->getExitCode();
 } finally {

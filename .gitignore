@@ -13,6 +13,14 @@
 /.zed
 /auth.json
 /node_modules
+/mobile/node_modules
+/mobile/.expo
+/mobile/dist
+/mobile/.env*
+!/mobile/.env.example
+*.apk
+*.aab
+*.ipa
 /public/build
 /public/hot
 /public/storage
