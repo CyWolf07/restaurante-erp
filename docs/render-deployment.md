@@ -36,6 +36,8 @@ Para una instalación nueva generar una clave con `php artisan key:generate --sh
 
 ## Inicialización y comprobación
 
+Si el plan gratuito no permite Shell, establecer `RUN_MIGRATIONS=true` en Render y desplegar. El arranque ejecuta las migraciones pendientes dentro de una transacción PostgreSQL y restringe las tablas del ERP para impedir acceso desde clientes Supabase. Solo afecta tablas creadas por las migraciones de este repositorio. Al terminar la instalación establecer `RUN_MIGRATIONS=false`; para futuras actualizaciones usar un proceso controlado de migraciones. El backend debe conectarse con un rol que pueda operar dichas tablas y omitir RLS (el usuario PostgreSQL de servidor de Supabase). No sembrar credenciales predeterminadas en un servicio público.
+
 Antes de usar el ERP, aplicar las migraciones a la base seleccionada con `php artisan migrate --force` desde un proceso de despliegue o shell con las variables del servicio. Revisar y respaldar previamente una base existente. El arranque no ejecuta migraciones ni siembra usuarios automáticamente. Las cuentas deben existir en la base remota; cuentas de la base local no aparecen en Supabase por desplegar el código.
 
 Comprobar `/up` y que `/api/v1/me`, sin sesión, devuelva JSON HTTP 401. Configurar en `mobile/.env`:

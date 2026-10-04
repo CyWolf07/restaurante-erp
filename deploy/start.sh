@@ -7,6 +7,9 @@ printf 'Listen %s\n' "$PORT" > /etc/apache2/ports.conf
 sed -i "s/__PORT__/$PORT/g" /etc/apache2/sites-available/000-default.conf
 mkdir -p storage/app/public storage/app/private storage/logs storage/framework/cache/data storage/framework/sessions storage/framework/views bootstrap/cache
 php artisan config:cache
+if [ "${RUN_MIGRATIONS:-false}" = "true" ]; then
+    php deploy/migrate.php
+fi
 php artisan view:cache
 chown -R www-data:www-data storage bootstrap/cache
 exec apache2-foreground
