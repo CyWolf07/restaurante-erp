@@ -13,6 +13,13 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Render terminates HTTPS before forwarding requests to the container.
+        if (env('APP_ENV') === 'production') {
+            $middleware->trustProxies(at: '*', headers:
+                \Illuminate\Http\Request::HEADER_X_FORWARDED_FOR |
+                \Illuminate\Http\Request::HEADER_X_FORWARDED_PORT |
+                \Illuminate\Http\Request::HEADER_X_FORWARDED_PROTO);
+        }
         $middleware->alias([
             'role' => EnsureUserHasRole::class,
         ]);
